@@ -47,3 +47,6 @@ app.post('/openai-proxy', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Proxy server listening on port ${PORT}`);
 });
+
+// The server needs to be exported for Vercel's serverless environment.
+module.exports = app;
