@@ -1,0 +1,7 @@
+# Ignore all Apps Script files pushed by clasp
+dist/
+.clasp.json
+.gas
+
+# Ignore project properties if you use them instead of Vercel
+.clasp-properties

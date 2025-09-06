@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: 'Roboto', 'Arial', sans-serif;
+        color: #3c4043;
+        background-color: #f8f9fa;
+        margin: 0;
+        padding: 0;
+      }
+      .tab-container {
+        display: flex;
+        justify-content: space-around;
+        border-bottom: 1px solid #dadce0;
+        background-color: #e8f0fe;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .tab-button {
+        flex-grow: 1;
+        padding: 12px 0;
+        text-align: center;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        color: #5f6368;
+        border-bottom: 2px solid transparent;
+        transition: all 0.3s ease;
+      }
+      .tab-button.active {
+        color: #1a73e8;
+        border-bottom-color: #1a73e8;
+        background-color: #e8f0fe;
+      }
+      .tab-button:hover:not(.active) {
+        background-color: #f1f3f4;
+      }
+      .tab-content {
+        padding: 20px;
+      }
+      #chatLog {
+        height: 350px;
+        overflow-y: auto;
+        border: 1px solid #dadce0;
+        padding: 10px;
+        margin-bottom: 15px;
+        background-color: #fff;
+        border-radius: 8px;
+        box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
+      }
+      .message-container {
+        margin-bottom: 10px;
+        line-height: 1.4;
+      }
+      .message-container b {
+        font-weight: 600;
+      }
+      .message-container.you b {
+        color: #34a853;
+      }
+      .message-container.bot b {
+        color: #1a73e8;
+      }
+      .input-container {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+      }
+      #userInput {
+        flex-grow: 1;
+        padding: 10px;
+        border: 1px solid #dadce0;
+        border-radius: 8px;
+        font-size: 14px;
+      }
+      .results-summary {
+        font-size: 14px;
+        margin-top: 10px;
+        background-color: #e8f0fe;
+        padding: 10px;
+        border-radius: 8px;
+        text-align: center;
+      }
+      .action-buttons {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        margin-top: 20px;
+      }
+      .action-buttons button {
+        padding: 10px 15px;
+        border: 1px solid #dadce0;
+        background-color: #fff;
+        color: #5f6368;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 14px;
+      }
+      .action-buttons button:hover {
+        background-color: #f1f3f4;
+        border-color: #c5c7c9;
+      }
+      .issue {
+        margin-bottom: 10px;
+        padding: 15px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      }
+      .issue.error {
+        border-left: 4px solid #d93025;
+        background-color: #fce8e6;
+      }
+      .issue.warn {
+        border-left: 4px solid #f9ab00;
+        background-color: #fff7e6;
+      }
+      .issue:hover {
+        background-color: #f1f3f4;
+      }
+      pre {
+        background-color: #f1f3f4;
+        padding: 15px;
+        border-radius: 8px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: 'Menlo', 'Courier New', monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        overflow-x: auto;
+      }
+      .loader {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #3498db;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        animation: spin 2s linear infinite;
+        margin: 0 auto 10px auto;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tab-container">
+      <div id="chatTabBtn" class="tab-button active">Chat</div>
+      <div id="resultsTabBtn" class="tab-button">Results</div>
+    </div>
+
+    <div id="chatTab" class="tab-content">
+      <div id="chatLog"></div>
+      <div class="input-container">
+        <input type="text" id="userInput" placeholder="Ask me here!" />
+        <button id="sendBtn">Send</button>
+      </div>
+      <div id="resultsInChat"></div>
+      <div class="action-buttons">
+        <button id="reanalyzeBtn">Re-analyze</button>
+      </div>
+    </div>
+
+    <div id="resultsTab" class="tab-content" style="display: none;">
+      <div id="resultsContent">
+        <p>Run an analysis in the chat tab to see results here.</p>
+      </div>
+    </div>
+
+    <script>
+      const chatLog = document.getElementById('chatLog');
+      const userInput = document.getElementById('userInput');
+      const sendBtn = document.getElementById('sendBtn');
+      const resultsInChatDiv = document.getElementById('resultsInChat');
+      const reanalyzeBtn = document.getElementById('reanalyzeBtn');
+      
+      const chatTabBtn = document.getElementById('chatTabBtn');
+      const resultsTabBtn = document.getElementById('resultsTabBtn');
+      const chatTab = document.getElementById('chatTab');
+      const resultsTab = document.getElementById('resultsTab');
+      const resultsContentDiv = document.getElementById('resultsContent');
+
+      // This function applies the desired styles directly to the buttons.
+      function setButtonStyles() {
+        const buttons = [sendBtn, reanalyzeBtn];
+        buttons.forEach(btn => {
+          btn.style.padding = '10px 15px';
+          btn.style.border = 'none';
+          btn.style.backgroundColor = 'limegreen';
+          btn.style.color = 'white';
+          btn.style.borderRadius = '8px';
+          btn.style.cursor = 'pointer';
+          btn.style.fontSize = '14px';
+          btn.style.display = 'flex';
+          btn.style.alignItems = 'center';
+          btn.style.justifyContent = 'center';
+          btn.onmouseover = () => btn.style.backgroundColor = 'green';
+          btn.onmouseout = () => btn.style.backgroundColor = 'limegreen';
+        });
+      }
+
+      sendBtn.addEventListener('click', () => sendMessage());
+      userInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') sendMessage();
+      });
+      reanalyzeBtn.addEventListener('click', () => sendMessage('analyze'));
+
+      chatTabBtn.addEventListener('click', () => switchTab('chat'));
+      resultsTabBtn.addEventListener('click', () => switchTab('results'));
+
+      function switchTab(tabName) {
+        if (tabName === 'chat') {
+          chatTabBtn.classList.add('active');
+          resultsTabBtn.classList.remove('active');
+          chatTab.style.display = 'block';
+          resultsTab.style.display = 'none';
+        } else {
+          chatTabBtn.classList.remove('active');
+          resultsTabBtn.classList.add('active');
+          resultsTab.style.display = 'block';
+          chatTab.style.display = 'none';
+        }
+      }
+
+      function appendMessage(sender, text) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message-container ${sender.toLowerCase()}`;
+        messageDiv.innerHTML = `<b>${sender}:</b> ${text}`;
+        chatLog.appendChild(messageDiv);
+        chatLog.scrollTop = chatLog.scrollHeight;
+      }
+      
+      function displayAnalysisResult(result) {
+        resultsContentDiv.innerHTML = '';
+        if (result.ok) {
+          const jsonString = JSON.stringify(result.loads, null, 2);
+          resultsContentDiv.innerHTML = `
+            <h3>✅ Analysis Complete!</h3>
+            <p>All checks passed. Loads are ready to be pushed.</p>
+            <div class="action-buttons">
+              <button id="copyJsonBtn">Copy JSON</button>
+              <button id="previewPushBtn">Preview Push</button>
+            </div>
+            <h4>Loads JSON:</h4>
+            <pre id="jsonPreview">${jsonString}</pre>`;
+            document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
+            document.getElementById('previewPushBtn').addEventListener('click', previewPush);
+        } else {
+          let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on an issue to jump to the cell.</p>`;
+          result.issues.forEach(issue => {
+            const row = issue.rows && issue.rows[0] ? issue.rows[0] : null;
+            const column = issue.column;
+            
+            const clickHandler = (row && column) ? `onclick="selectCell(${JSON.stringify(column)}, ${row})"` : '';
+
+            issuesHtml += `<div class="issue ${issue.severity}" ${clickHandler}>
+              <strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
+              <small>Suggestion: ${issue.suggestion}</small>
+            </div>`;
+          });
+          resultsContentDiv.innerHTML = issuesHtml;
+        }
+      }
+
+      function sendMessage(msg = null) {
+        const finalMsg = msg || userInput.value.trim();
+        if (!finalMsg) return;
+
+        resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Analyzing sheet...</p>`;
+        
+        appendMessage('You', finalMsg);
+        userInput.value = '';
+
+        google.script.run
+          .withSuccessHandler(response => {
+            resultsInChatDiv.innerHTML = '';
+            
+            if (typeof response === 'object' && response.ok !== undefined) {
+              displayAnalysisResult(response);
+              appendMessage('Bot', `Analysis complete. Found ${response.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`);
+            } else {
+              appendMessage('Bot', response);
+            }
+          })
+          .withFailureHandler(onError)
+          .handleChatMessage(finalMsg);
+      }
+      
+      function copyJson() {
+        const jsonText = document.getElementById('jsonPreview').innerText;
+        navigator.clipboard.writeText(jsonText).then(() => {
+          alert('JSON copied to clipboard!');
+        }).catch(err => {
+          console.error('Failed to copy text: ', err);
+          alert('Failed to copy JSON. Please copy manually.');
+        });
+      }
+      
+      function previewPush() {
+        const loadsJson = document.getElementById('jsonPreview').innerText;
+        alert('Preview of Push Payload:\n\n' + loadsJson);
+      }
+
+      function selectCell(colName, rowNum) {
+        google.script.run
+            .withSuccessHandler(function() {
+                google.script.host.parent.focus();
+            })
+            .withFailureHandler(onError)
+            .selectSheetCell(colName, rowNum);
+      }
+      
+      function onError(error) {
+        resultsInChatDiv.innerHTML = '';
+        console.error('An error occurred:', error);
+        appendMessage('Bot', `Error: ${error.message}`);
+      }
+      
+      // Call the function to set styles on page load
+      document.addEventListener('DOMContentLoaded', setButtonStyles);
+    </script>
+  </body>
+</html>
