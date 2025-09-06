@@ -1,8 +1,8 @@
 {
-  "rewrites": [
-    {
-      "source": "/openai-proxy",
-      "destination": "/index.js"
-    }
-  ]
+"rewrites": [
+{
+"source": "/openai-proxy",
+"destination": "/api/index.js"
+}
+]
 }
