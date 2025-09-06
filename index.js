@@ -8,6 +8,12 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(cors());
 
+// A basic root route to confirm the server is running.
+app.get('/', (req, res) => {
+  res.status(200).send('OpenAI Proxy server is running.');
+});
+
+// The main endpoint for the chatbot.
 app.post('/openai-proxy', async (req, res) => {
   const { prompt, model } = req.body;
   const openaiApiKey = process.env.OPENAI_API_KEY;
@@ -36,6 +42,8 @@ app.post('/openai-proxy', async (req, res) => {
   }
 });
 
+// This is the part that is not used by Vercel's serverless platform.
+// The vercel.json file handles the server startup.
 app.listen(PORT, () => {
   console.log(`Proxy server listening on port ${PORT}`);
 });
