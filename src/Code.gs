@@ -15,53 +15,44 @@ function showSidebar() {
 }
 
 /**
- * Handles a chat message by sending it to the OpenAI API and returning the response.
+ * Handles a chat message by checking for sheet analysis commands or sending to the Vercel proxy.
  * @param {string} userMessage The user's message from the UI.
- * @return {string} The AI's response.
+ * @return {string} The AI's response or an analysis result.
  */
 function handleChatMessage(userMessage) {
-  // Retrieve the API key from the script properties.
-  const apiKey = PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
-  const endpoint = 'https://api.openai.com/v1/chat/completions';
-  
-  if (!apiKey) {
-    return 'Error: OpenAI API key not found. Please add it to your project properties.';
-  }
+  const trimmedMessage = userMessage.toLowerCase().trim();
 
+  // Check if the user is asking for sheet analysis
+  if (trimmedMessage.includes("analyze") || trimmedMessage.includes("summary")) {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    const result = validateSheet(sheet); // Assuming validateSheet is still in api.gs
+    return result;
+  }
+  
+  // If not, send the message to the Vercel proxy
+  const proxyUrl = 'https://truck-talk-connect.vercel.app/openai-proxy';
+  
   const payload = {
-    model: 'gpt-3.5-turbo',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are a helpful assistant for analyzing and summarizing data from a Google Sheet.'
-      },
-      {
-        role: 'user',
-        content: userMessage
-      }
-    ],
-    temperature: 0.7
+    prompt: userMessage,
+    model: 'gpt-3.5-turbo'
   };
 
   const options = {
     method: 'post',
     contentType: 'application/json',
-    headers: {
-      'Authorization': 'Bearer ' + apiKey
-    },
     payload: JSON.stringify(payload)
   };
 
   try {
-    const response = UrlFetchApp.fetch(endpoint, options);
+    const response = UrlFetchApp.fetch(proxyUrl, options);
     const jsonResponse = JSON.parse(response.getContentText());
     
     if (jsonResponse.choices && jsonResponse.choices.length > 0) {
       return jsonResponse.choices[0].message.content;
     } else {
-      return 'No response from the API. Check your request and API key.';
+      return 'No response from the proxy. Check your request and proxy URL.';
     }
   } catch (e) {
-    return 'Error communicating with the OpenAI API: ' + e.message;
+    return 'Error communicating with the proxy server: ' + e.message;
   }
 }

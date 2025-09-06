@@ -270,29 +270,27 @@
         }
       }
 
-      function sendMessage(msg = null) {
-        const finalMsg = msg || userInput.value.trim();
-        if (!finalMsg) return;
+function sendMessage(msg = null) {
+  const finalMsg = msg || userInput.value.trim();
+  if (!finalMsg) return;
 
-        resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Analyzing sheet...</p>`;
-        
-        appendMessage('You', finalMsg);
-        userInput.value = '';
+  resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Thinking...</p>`;
+  appendMessage('You', finalMsg);
+  userInput.value = '';
 
-        google.script.run
-          .withSuccessHandler(response => {
-            resultsInChatDiv.innerHTML = '';
-            
-            if (typeof response === 'object' && response.ok !== undefined) {
-              displayAnalysisResult(response);
-              appendMessage('Bot', `Analysis complete. Found ${response.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`);
-            } else {
-              appendMessage('Bot', response);
-            }
-          })
-          .withFailureHandler(onError)
-          .handleChatMessage(finalMsg);
+  google.script.run
+    .withSuccessHandler(response => {
+      resultsInChatDiv.innerHTML = '';
+      if (typeof response === 'object') {
+        displayAnalysisResult(response);
+        appendMessage('Bot', `Analysis complete. Found ${response.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`);
+      } else {
+        appendMessage('Bot', response);
       }
+    })
+    .withFailureHandler(onError)
+    .handleChatMessage(finalMsg);
+}
       
       function copyJson() {
         const jsonText = document.getElementById('jsonPreview').innerText;

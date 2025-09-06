@@ -184,24 +184,6 @@ function validateSheet(sheet) {
   };
 }
 
-/**
- * Handle chat messages from the sidebar
- * @param {string} message
- * @returns {AnalysisResult | string} response
- */
-function handleChatMessage(message) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const trimmedMessage = message.toLowerCase().trim();
-
-  if (trimmedMessage.includes("analyze")) {
-    return validateSheet(sheet);
-  } else if (trimmedMessage.includes("summary")) {
-    const result = validateSheet(sheet);
-    return `Analyzed ${result.meta.analyzedRows} rows. ${result.issues.length} issue(s) detected.`;
-  } else {
-    return "I can help you analyze the sheet. Try typing 'analyze' or 'summary'.";
-  }
-}
 
 /**
  * Finds a cell by column name and row number and activates it.
