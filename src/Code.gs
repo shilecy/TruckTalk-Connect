@@ -19,24 +19,65 @@ function showSidebar() {
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
+// A new function to select a cell based on the header name and row number
+function selectSheetCell(colName, rowNum) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const colIndex = headerRow.indexOf(colName);
+  
+  if (colIndex !== -1) {
+    sheet.getRange(rowNum, colIndex + 1).activate();
+  } else {
+    throw new Error(`Column with header "${colName}" not found.`);
+  }
+}
+
 // --- Main Chat & Analysis Functions ---
 
 /**
  * Handles a chat message by checking for sheet analysis commands or sending to the Vercel proxy.
+ * This function is the main router for all user messages.
  * @param {string} userMessage The user's message from the UI.
- * @return {string} The AI's response or an analysis result.
+ * @return {string | object} The AI's response or an analysis result object.
  */
 function handleChatMessage(userMessage) {
   const trimmedMessage = userMessage.toLowerCase().trim();
 
-  // Check if the user is asking for sheet analysis
+  // Check for commands that require sheet analysis
   if (trimmedMessage.includes("analyze") || trimmedMessage.includes("summary")) {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    const result = validateSheet(sheet);
-    return result; // The logic for analysis is in the separate functions below
+    // This is a new function to handle the analysis conversation flow
+    return processSheetAnalysisCommand(userMessage); 
   }
   
-  // If not, send the message to the Vercel proxy
+  // If no specific command is detected, forward the message to the chat proxy
+  return processGeneralChat(userMessage);
+}
+
+/**
+ * Processes a command related to sheet analysis. In the future, this function
+ * will handle multi-turn conversations about analysis results.
+ * @param {string} userMessage The user's message.
+ * @returns {object} The analysis result object.
+ */
+function processSheetAnalysisCommand(userMessage) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const analysisResult = validateSheet(sheet);
+  
+  // For now, we'll just return the structured analysis result.
+  // In the future, this is where we'll add logic to:
+  // 1. Store the analysis result in a cache for future turns.
+  // 2. Use the AI to generate a plain-language summary of the issues.
+  // 3. Handle commands like "use DEL Time for delivery appt."
+  
+  return analysisResult;
+}
+
+/**
+ * Sends a general chat message to the Vercel proxy.
+ * @param {string} userMessage The user's message.
+ * @returns {string} The response from the AI.
+ */
+function processGeneralChat(userMessage) {
   const proxyUrl = 'https://truck-talk-connect.vercel.app/openai-proxy';
   
   const payload = {

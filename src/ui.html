@@ -207,11 +207,11 @@
         });
       }
 
-      sendBtn.addEventListener('click', () => sendMessage());
+      sendBtn.addEventListener('click', () => sendMessage({command: 'general_chat', message: userInput.value.trim()}));
       userInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') sendMessage();
+        if (e.key === 'Enter') sendMessage({command: 'general_chat', message: userInput.value.trim()});
       });
-      reanalyzeBtn.addEventListener('click', () => sendMessage('analyze'));
+      reanalyzeBtn.addEventListener('click', () => sendMessage({command: 'analyze_sheet'}));
 
       chatTabBtn.addEventListener('click', () => switchTab('chat'));
       resultsTabBtn.addEventListener('click', () => switchTab('results'));
@@ -229,7 +229,7 @@
           chatTab.style.display = 'none';
         }
       }
-
+      
       function appendMessage(sender, text) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message-container ${sender.toLowerCase()}`;
@@ -269,28 +269,32 @@
           resultsContentDiv.innerHTML = issuesHtml;
         }
       }
+      
+      // Main function to send commands or messages
+      function sendMessage(payload) {
+        if (!payload.message && payload.command === 'general_chat') {
+          return; // Don't send empty messages
+        }
+        
+        const userMessage = payload.message || payload.command;
+        
+        resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Thinking...</p>`;
+        appendMessage('You', userMessage);
+        userInput.value = '';
 
-function sendMessage(msg = null) {
-  const finalMsg = msg || userInput.value.trim();
-  if (!finalMsg) return;
-
-  resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Thinking...</p>`;
-  appendMessage('You', finalMsg);
-  userInput.value = '';
-
-  google.script.run
-    .withSuccessHandler(response => {
-      resultsInChatDiv.innerHTML = '';
-      if (typeof response === 'object') {
-        displayAnalysisResult(response);
-        appendMessage('Bot', `Analysis complete. Found ${response.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`);
-      } else {
-        appendMessage('Bot', response);
+        google.script.run
+          .withSuccessHandler(response => {
+            resultsInChatDiv.innerHTML = '';
+            if (typeof response === 'object' && response !== null && 'issues' in response) {
+              displayAnalysisResult(response);
+              appendMessage('Bot', `Analysis complete. Found ${response.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`);
+            } else {
+              appendMessage('Bot', response);
+            }
+          })
+          .withFailureHandler(onError)
+          .handleChatMessage(payload);
       }
-    })
-    .withFailureHandler(onError)
-    .handleChatMessage(finalMsg);
-}
       
       function copyJson() {
         const jsonText = document.getElementById('jsonPreview').innerText;

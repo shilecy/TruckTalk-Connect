@@ -1,17 +1,25 @@
 {
-  "timeZone": "Asia/Kuala_Lumpur",
-  "dependencies": {},
-  "exceptionLogging": "STACKDRIVER",
-  "runtimeVersion": "V8",
-  "addOns": {
-    "common": {
-      "name": "TruckTalk Connect",
-      "logoUrl": "https://cdn-icons-png.flaticon.com/512/743/743007.png",
-      "layoutProperties": {
-        "primaryColor": "#1976d2",
-        "secondaryColor": "#ffffff"
-      }
-    },
-    "sheets": {}
-  }
+"timeZone": "Asia/Kuala_Lumpur",
+"dependencies": {},
+"exceptionLogging": "STACKDRIVER",
+"runtimeVersion": "V8",
+"addOns": {
+"common": {
+"name": "TruckTalk Connect",
+"logoUrl": "https://cdn-icons-png.flaticon.com/512/743/743007.png",
+"homepageTrigger": {
+"runFunction": "onOpen"
+},
+"layoutProperties": {
+"primaryColor": "#1976d2",
+"secondaryColor": "#ffffff"
+}
+},
+"sheets": {}
+},
+"oauthScopes": [
+"https://www.googleapis.com/auth/spreadsheets.currentonly",
+"https://www.googleapis.com/auth/script.container.ui",
+"https://www.googleapis.com/auth/script.external_request"
+]
 }
