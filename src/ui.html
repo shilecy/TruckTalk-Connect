@@ -2,332 +2,270 @@
 <html>
   <head>
     <base target="_top">
+    <meta charset="utf-8" />
+    <title>TruckTalk Connect</title>
     <style>
-      body {
-        font-family: 'Roboto', 'Arial', sans-serif;
-        color: #3c4043;
-        background-color: #f8f9fa;
-        margin: 0;
-        padding: 0;
-      }
-      .tab-container {
-        display: flex;
-        justify-content: space-around;
-        border-bottom: 1px solid #dadce0;
-        background-color: #e8f0fe;
-        position: sticky;
-        top: 0;
-        z-index: 10;
-      }
-      .tab-button {
-        flex-grow: 1;
-        padding: 12px 0;
-        text-align: center;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-        color: #5f6368;
-        border-bottom: 2px solid transparent;
-        transition: all 0.3s ease;
-      }
-      .tab-button.active {
-        color: #1a73e8;
-        border-bottom-color: #1a73e8;
-        background-color: #e8f0fe;
-      }
-      .tab-button:hover:not(.active) {
-        background-color: #f1f3f4;
-      }
-      .tab-content {
-        padding: 20px;
-      }
-      #chatLog {
-        height: 350px;
-        overflow-y: auto;
-        border: 1px solid #dadce0;
-        padding: 10px;
-        margin-bottom: 15px;
-        background-color: #fff;
-        border-radius: 8px;
-        box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
-        display: flex;
-        flex-direction: column;
-      }
-      .message-container {
-        margin-bottom: 10px;
-        line-height: 1.4;
-      }
-      .message-container b {
-        font-weight: 600;
-      }
-      .message-container.you b {
-        color: #34a853;
-      }
-      .message-container.bot b {
-        color: #1a73e8;
-      }
-      .input-container {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 15px;
-      }
-      #userInput {
-        flex-grow: 1;
-        padding: 10px;
-        border: 1px solid #dadce0;
-        border-radius: 8px;
-        font-size: 14px;
-      }
-      .results-summary {
-        font-size: 14px;
-        margin-top: 10px;
-        background-color: #e8f0fe;
-        padding: 10px;
-        border-radius: 8px;
-        text-align: center;
-      }
-      .action-buttons {
-        display: flex;
-        gap: 10px;
-        justify-content: center;
-        margin-top: 20px;
-      }
-      .action-buttons button {
-        padding: 10px 15px;
-        border: 1px solid #dadce0;
-        background-color: #fff;
-        color: #5f6368;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.2s;
-        font-size: 14px;
-      }
-      .action-buttons button:hover {
-        background-color: #f1f3f4;
-        border-color: #c5c7c9;
-      }
-      .issue {
-        margin-bottom: 10px;
-        padding: 15px;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: background-color 0.2s;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-      }
-      .issue.error {
-        border-left: 4px solid #d93025;
-        background-color: #fce8e6;
-      }
-      .issue.warn {
-        border-left: 4px solid #f9ab00;
-        background-color: #fff7e6;
-      }
-      .issue:hover {
-        background-color: #f1f3f4;
-      }
-      pre {
-        background-color: #f1f3f4;
-        padding: 15px;
-        border-radius: 8px;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        font-family: 'Menlo', 'Courier New', monospace;
-        font-size: 13px;
-        line-height: 1.5;
-        overflow-x: auto;
-      }
-      .loader {
-        border: 4px solid #f3f3f3;
-        border-top: 4px solid #3498db;
-        border-radius: 50%;
-        width: 20px;
-        height: 20px;
-        animation: spin 2s linear infinite;
-        margin: 0 auto 10px auto;
-      }
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
+      body { font-family: 'Roboto', Arial, sans-serif; margin: 0; color: #222; background:#fafafa; }
+      .header { background:#1a73e8; color:#fff; padding:12px; font-weight:600; }
+      .container { padding:12px; }
+      .row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+      #chatLog { display:none; } /* keep chat implementation, but main flow is analyze/results */
+      .btn { padding:8px 12px; border-radius:8px; border:none; cursor:pointer; background:#1a73e8; color:white; }
+      .btn.secondary { background:#fff; color:#1a73e8; border:1px solid #1a73e8; }
+      .issues { margin-top:12px; }
+      .issue { padding:10px; border-radius:8px; margin-bottom:8px; }
+      .issue.error { background:#fff0f0; border-left:4px solid #d93025; }
+      .issue.warn { background:#fffaf0; border-left:4px solid #f9ab00; }
+      .mapping-box { margin-top:10px; padding:10px; background:#ffffff; border-radius:8px; border:1px solid #ececec; }
+      select { padding:6px; border-radius:6px; border:1px solid #ddd; }
+      pre { background:#f1f3f4; padding:10px; border-radius:8px; max-height:220px; overflow:auto; font-size:13px; }
+      .small { font-size:12px; color:#666; }
+      .action-row { display:flex; gap:8px; margin-top:8px; }
+      .loader { border:4px solid #f3f3f3; border-top:4px solid #3498db; border-radius:50%; width:18px; height:18px; animation:spin 1s linear infinite; display:inline-block; vertical-align:middle; margin-right:8px; }
+      @keyframes spin { 0%{transform:rotate(0)} 100%{transform:rotate(360deg)} }
     </style>
   </head>
   <body>
-    <div class="tab-container">
-      <div id="chatTabBtn" class="tab-button active">Chat</div>
-      <div id="resultsTabBtn" class="tab-button">Results</div>
-    </div>
+    <div class="header">TruckTalk Connect</div>
+    <div class="container">
+      <div class="row">
+        <button id="analyzeBtn" class="btn">Analyze current tab</button>
+        <button id="reanalyzeBtn" class="btn secondary" disabled>Re-analyze</button>
+      </div>
 
-    <div id="chatTab" class="tab-content">
-      <div id="chatLog"></div>
-      <div class="input-container">
-        <input type="text" id="userInput" placeholder="Ask me here!" />
-        <button id="sendBtn">Send</button>
-      </div>
-      <div id="resultsInChat"></div>
-      <div class="action-buttons">
-        <button id="reanalyzeBtn">Re-analyze</button>
-      </div>
-    </div>
+      <div id="status" class="small">Ready.</div>
 
-    <div id="resultsTab" class="tab-content" style="display: none;">
-      <div id="resultsContent">
-        <p>Run an analysis in the chat tab to see results here.</p>
-      </div>
+      <div id="results" style="margin-top:12px;"></div>
     </div>
 
     <script>
-      const chatLog = document.getElementById('chatLog');
-      const userInput = document.getElementById('userInput');
-      const sendBtn = document.getElementById('sendBtn');
-      const resultsInChatDiv = document.getElementById('resultsInChat');
+      // Utility: call server handler
+      function serverCall(fn, arg, onOk, onFail) {
+        onFail = onFail || (e => { alert("Error: " + (e.message || e)); });
+        google.script.run.withSuccessHandler(onOk).withFailureHandler(onFail)[fn](arg);
+      }
+
+      const analyzeBtn = document.getElementById('analyzeBtn');
       const reanalyzeBtn = document.getElementById('reanalyzeBtn');
-      
-      const chatTabBtn = document.getElementById('chatTabBtn');
-      const resultsTabBtn = document.getElementById('resultsTabBtn');
-      const chatTab = document.getElementById('chatTab');
-      const resultsTab = document.getElementById('resultsTab');
-      const resultsContentDiv = document.getElementById('resultsContent');
+      const statusEl = document.getElementById('status');
+      const resultsEl = document.getElementById('results');
 
-      // This function applies the desired styles directly to the buttons.
-      function setButtonStyles() {
-        const buttons = [sendBtn, reanalyzeBtn];
-        buttons.forEach(btn => {
-          btn.style.padding = '10px 15px';
-          btn.style.border = 'none';
-          btn.style.backgroundColor = 'limegreen';
-          btn.style.color = 'white';
-          btn.style.borderRadius = '8px';
-          btn.style.cursor = 'pointer';
-          btn.style.fontSize = '14px';
-          btn.style.display = 'flex';
-          btn.style.alignItems = 'center';
-          btn.style.justifyContent = 'center';
-          btn.onmouseover = () => btn.style.backgroundColor = 'green';
-          btn.onmouseout = () => btn.style.backgroundColor = 'limegreen';
+      function setStatus(txt) { statusEl.textContent = txt; }
+
+      function handleAnalysisResponse(resp) {
+        reanalyzeBtn.disabled = false;
+        analyzeBtn.disabled = false;
+        setStatus('Analysis finished: ' + (resp.ok ? 'OK' : 'Issues found'));
+
+        // Build UI
+        resultsEl.innerHTML = '';
+
+        // Mapping section
+        const headers = (resp && resp.meta && resp.mapping) ? Object.keys(resp.mapping) : null;
+        // But we need the original sheet headers for dropdowns. We'll get them via getSheetHeaders RPC.
+        serverCall('getSheetHeaders', null, function(headersResp) {
+          // headersResp: array of header strings from sheet
+          renderResults(resp, headersResp || []);
         });
       }
 
-      sendBtn.addEventListener('click', () => sendMessage({command: 'general_chat', message: userInput.value.trim()}));
-      userInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') sendMessage({command: 'general_chat', message: userInput.value.trim()});
-      });
-      reanalyzeBtn.addEventListener('click', () => sendMessage({command: 'analyze_sheet'}));
+      analyzeBtn.onclick = () => {
+        analyzeBtn.disabled = true;
+        setStatus('Analyzing...');
+        resultsEl.innerHTML = '<div class="small"><span class="loader"></span>Analyzing sheet...</div>';
+        // Tell server to analyze sheet
+        google.script.run.withSuccessHandler(handleAnalysisResponse).withFailureHandler(function(err){
+          analyzeBtn.disabled = false;
+          setStatus('Error: ' + (err.message || err));
+          resultsEl.innerHTML = '';
+        }).handleChatMessage({ command: 'analyze_sheet' });
+      };
 
-      chatTabBtn.addEventListener('click', () => switchTab('chat'));
-      resultsTabBtn.addEventListener('click', () => switchTab('results'));
+      reanalyzeBtn.onclick = () => {
+        analyzeBtn.click();
+      };
 
-      function switchTab(tabName) {
-        if (tabName === 'chat') {
-          chatTabBtn.classList.add('active');
-          resultsTabBtn.classList.remove('active');
-          chatTab.style.display = 'block';
-          resultsTab.style.display = 'none';
+      // Renders analysis result - accepts resp (AnalysisResult) and sheetHeaders array
+      function renderResults(resp, sheetHeaders) {
+        resultsEl.innerHTML = '';
+
+        // 1) Issues panel grouped by severity
+        if (resp.issues && resp.issues.length) {
+          const high = resp.issues.filter(i => i.severity === 'error');
+          const warn = resp.issues.filter(i => i.severity === 'warn');
+
+          const issuesDiv = document.createElement('div');
+          issuesDiv.innerHTML = '<h4>Issues</h4><div class="small">Click an issue to jump to the corresponding cell (if row & column provided).</div>';
+          if (high.length) {
+            high.forEach(i => {
+              const d = document.createElement('div'); d.className = 'issue error';
+              d.innerHTML = `<div><strong>ERROR:</strong> ${i.message}</div><div class="small">Suggestion: ${i.suggestion || '-'}</div>`;
+              if (i.rows && i.rows.length && i.column) {
+                d.style.cursor = 'pointer';
+                d.onclick = () => selectCell(i.column, i.rows[0]);
+              }
+              issuesDiv.appendChild(d);
+            });
+          }
+          if (warn.length) {
+            warn.forEach(i => {
+              const d = document.createElement('div'); d.className = 'issue warn';
+              d.innerHTML = `<div><strong>WARN:</strong> ${i.message}</div><div class="small">Suggestion: ${i.suggestion || '-'}</div>`;
+              if (i.rows && i.rows.length && i.column) {
+                d.style.cursor = 'pointer';
+                d.onclick = () => selectCell(i.column, i.rows[0]);
+              }
+              issuesDiv.appendChild(d);
+            });
+          }
+          resultsEl.appendChild(issuesDiv);
         } else {
-          chatTabBtn.classList.remove('active');
-          resultsTabBtn.classList.add('active');
-          resultsTab.style.display = 'block';
-          chatTab.style.display = 'none';
+          const okDiv = document.createElement('div');
+          okDiv.innerHTML = '<h4>✅ No critical issues found</h4><div class="small">Data looks good — you can copy JSON or preview push.</div>';
+          resultsEl.appendChild(okDiv);
         }
-      }
-      
-      function appendMessage(sender, text) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message-container ${sender.toLowerCase()}`;
-        messageDiv.innerHTML = `<b>${sender}:</b> ${text}`;
-        chatLog.appendChild(messageDiv);
-        chatLog.scrollTop = chatLog.scrollHeight;
-      }
-      
-      function displayAnalysisResult(result) {
-        resultsContentDiv.innerHTML = '';
-        if (result.ok) {
-          const jsonString = JSON.stringify(result.loads, null, 2);
-          resultsContentDiv.innerHTML = `
-            <h3>✅ Analysis Complete!</h3>
-            <p>All checks passed. Loads are ready to be pushed.</p>
-            <div class="action-buttons">
-              <button id="copyJsonBtn">Copy JSON</button>
-              <button id="previewPushBtn">Preview Push</button>
-            </div>
-            <h4>Loads JSON:</h4>
-            <pre id="jsonPreview">${jsonString}</pre>`;
-            document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
-            document.getElementById('previewPushBtn').addEventListener('click', previewPush);
-        } else {
-          let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on an issue to jump to the cell.</p>`;
-          result.issues.forEach(issue => {
-            const row = issue.rows && issue.rows[0] ? issue.rows[0] : null;
-            const column = issue.column;
-            
-            const clickHandler = (row && column) ? `onclick="selectCell(${JSON.stringify(column)}, ${row})"` : '';
 
-            issuesHtml += `<div class="issue ${issue.severity}" ${clickHandler}>
-              <strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
-              <small>Suggestion: ${issue.suggestion}</small>
-            </div>`;
+        // 2) Mapping UI: show current mapping and allow changing per field using dropdown (sheetHeaders)
+        const mappingBox = document.createElement('div');
+        mappingBox.className = 'mapping-box';
+        mappingBox.innerHTML = '<h4>Header → Field mapping</h4><div class="small">Confirm or edit the header selected for each field. Save mapping to persist per-user (used next analyses).</div>';
+        // Build table: for each canonical field show dropdown of sheet headers + option '— (none)'
+        const mappingTable = document.createElement('div');
+        const currentHeaderToField = resp.mapping || {}; // header->field
+        // invert to field->header for convenience
+        const fieldToHeader = {};
+        for (const h in currentHeaderToField) {
+          const f = currentHeaderToField[h];
+          fieldToHeader[f] = h;
+        }
+        // Use LOAD_FIELDS order
+        const fields = ["loadId","fromAddress","fromAppointmentDateTimeUTC","toAddress","toAppointmentDateTimeUTC","status","driverName","driverPhone","unitNumber","broker"];
+        fields.forEach(f => {
+          const row = document.createElement('div');
+          row.style.display = 'flex'; row.style.gap = '8px'; row.style.alignItems='center'; row.style.marginBottom='6px';
+          const label = document.createElement('div'); label.style.width='220px'; label.innerHTML = `<strong>${f}</strong>`;
+          const select = document.createElement('select');
+          const noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.text = '-- none --';
+          select.appendChild(noneOpt);
+          sheetHeaders.forEach(h => {
+            const opt = document.createElement('option'); opt.value = h; opt.text = h;
+            select.appendChild(opt);
           });
-          resultsContentDiv.innerHTML = issuesHtml;
-        }
-      }
-      
-      // Main function to send commands or messages
-      function sendMessage(payload) {
-        if (!payload.message && payload.command === 'general_chat') {
-          return; // Don't send empty messages
-        }
-        
-        const userMessage = payload.message || payload.command;
-        
-        resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Thinking...</p>`;
-        appendMessage('You', userMessage);
-        userInput.value = '';
-
-        google.script.run
-          .withSuccessHandler(response => {
-            resultsInChatDiv.innerHTML = '';
-            if (typeof response === 'object' && response !== null && 'issues' in response) {
-              displayAnalysisResult(response);
-              appendMessage('Bot', `Analysis complete. Found ${response.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`);
-            } else {
-              appendMessage('Bot', response);
-            }
-          })
-          .withFailureHandler(onError)
-          .handleChatMessage(payload);
-      }
-      
-      function copyJson() {
-        const jsonText = document.getElementById('jsonPreview').innerText;
-        navigator.clipboard.writeText(jsonText).then(() => {
-          alert('JSON copied to clipboard!');
-        }).catch(err => {
-          console.error('Failed to copy text: ', err);
-          alert('Failed to copy JSON. Please copy manually.');
+          // pre-select existing header if any
+          if (fieldToHeader[f]) {
+            select.value = fieldToHeader[f];
+          } else {
+            select.value = '';
+          }
+          row.appendChild(label);
+          row.appendChild(select);
+          mappingTable.appendChild(row);
         });
-      }
-      
-      function previewPush() {
-        const loadsJson = document.getElementById('jsonPreview').innerText;
-        alert('Preview of Push Payload:\n\n' + loadsJson);
+
+        mappingBox.appendChild(mappingTable);
+
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn';
+        saveBtn.textContent = 'Save mapping & re-run analysis';
+        saveBtn.onclick = () => {
+          // gather header->field mapping from selects
+          const selects = mappingTable.querySelectorAll('select');
+          const headerToField = {};
+          const selFields = fields;
+          selects.forEach((sel, idx) => {
+            const header = sel.value;
+            const field = selFields[idx];
+            if (header) headerToField[header] = field;
+          });
+          // call server to save mapping and re-run analysis
+          setStatus('Saving mapping and re-running analysis...');
+          google.script.run.withSuccessHandler(function(newResp){
+            // newResp is AnalysisResult
+            handleAnalysisResponse(newResp);
+          }).withFailureHandler(function(err){
+            setStatus('Error saving mapping: ' + (err.message || err));
+          }).saveUserMapping(headerToField);
+        };
+        mappingBox.appendChild(saveBtn);
+        resultsEl.appendChild(mappingBox);
+
+        // 3) If ok: show Loads JSON preview + Copy + Preview Push
+        if (resp.ok && resp.loads && resp.loads.length) {
+          const loadsBox = document.createElement('div');
+          loadsBox.style.marginTop = '12px';
+          loadsBox.innerHTML = `<h4>Loads JSON (preview)</h4>`;
+
+          const pre = document.createElement('pre');
+          pre.id = 'loadsJsonPreview';
+          pre.textContent = JSON.stringify(resp.loads, null, 2);
+          loadsBox.appendChild(pre);
+
+          const copyBtn = document.createElement('button');
+          copyBtn.className = 'btn secondary';
+          copyBtn.textContent = 'Copy JSON';
+          copyBtn.onclick = () => {
+            navigator.clipboard.writeText(pre.textContent).then(()=> showModal('JSON copied to clipboard.'));
+          };
+
+          const pushBtn = document.createElement('button');
+          pushBtn.className = 'btn';
+          pushBtn.textContent = 'Preview Push (write preview sheet)';
+          pushBtn.onclick = () => {
+            setStatus('Pushing preview to a new sheet...');
+            // call server previewPushToSheet
+            google.script.run.withSuccessHandler(function(res){
+              if (res && res.ok) {
+                setStatus('Preview sheet created: ' + res.sheetName);
+                showModal('Preview sheet created: ' + res.sheetName);
+              } else {
+                setStatus('Preview push failed: ' + (res && res.message));
+                showModal('Preview push failed: ' + (res && res.message));
+              }
+            }).withFailureHandler(function(err){
+              setStatus('Preview push failed: ' + (err.message || err));
+              showModal('Preview push failed: ' + (err.message || err));
+            }).previewPushToSheet(resp.loads);
+          };
+
+          const btnRow = document.createElement('div'); btnRow.className = 'action-row';
+          btnRow.appendChild(copyBtn); btnRow.appendChild(pushBtn);
+          loadsBox.appendChild(btnRow);
+
+          resultsEl.appendChild(loadsBox);
+        }
+
+        // enable reanalyze
+        reanalyzeBtn.disabled = false;
       }
 
+      // helper: get sheet headers (simple RPC)
+      function getSheetHeaders(callback) {
+        google.script.run.withSuccessHandler(callback).withFailureHandler(function(err){
+          console.error(err);
+          callback([]);
+        }).getSheetHeaders();
+      }
+
+      // Modal helper
+      function showModal(msg) {
+        alert(msg);
+      }
+
+      // RPC wrapper to select a cell
       function selectCell(colName, rowNum) {
-        google.script.run
-            .withSuccessHandler(function() {
-                google.script.host.parent.focus();
-            })
-            .withFailureHandler(onError)
-            .selectSheetCell(colName, rowNum);
+        google.script.run.withSuccessHandler(function(){ /* focus */ }).withFailureHandler(function(err){
+          console.error(err);
+          showModal('Cannot navigate to cell: ' + (err.message || err));
+        }).selectSheetCell(colName, rowNum);
       }
-      
-      function onError(error) {
-        resultsInChatDiv.innerHTML = '';
-        console.error('An error occurred:', error);
-        appendMessage('Bot', `Error: ${error.message}`);
-      }
-      
-      // Call the function to set styles on page load
-      document.addEventListener('DOMContentLoaded', setButtonStyles);
+
+      // Expose for server callback
+      window.handleAnalysisResponse = handleAnalysisResponse;
+
+      // Small helper to call analyze once the page loads if desired
+      document.addEventListener('DOMContentLoaded', function(){
+        // Style tweaks already applied via CSS
+      });
     </script>
   </body>
 </html>
