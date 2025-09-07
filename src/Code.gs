@@ -11,127 +11,196 @@ const REQUIRED_FIELDS = [
   'originAddress',
   'destinationName',
   'destinationAddress',
-  'originAppointmentDateTimeUTC',
-  'destinationAppointmentDateTimeUTC',
-  'status',
-  'driverName',
-  'unitNumber',
-  'broker'
+  'pickupDate',
+  'pickupTime',
+  'deliveryDate',
+  'deliveryTime',
+  'trailerType',
+  'product',
+  'quantity',
+  'unit',
+  'weight',
+  'rate',
+  'rateType',
+  'contact',
+  'reference'
 ];
-
-// Header synonyms for the AI to reference.
-const HEADER_SYNONYMS = {
-  loadNumber: ["Load #", "Load ID", "Ref", "VRID", "Reference", "Ref #"],
-  originName: ["Origin", "Pickup", "PU"],
-  originAddress: ["Pickup Address", "From", "PU Address"],
-  destinationName: ["Destination", "Drop", "DEL"],
-  destinationAddress: ["Delivery Address", "To", "DEL Address"],
-  originAppointmentDateTimeUTC: ["PU Time", "Pickup Appt", "Pickup Date/Time"],
-  destinationAppointmentDateTimeUTC: ["DEL Time", "Delivery Appt", "Delivery Date/Time"],
-  status: ["Status", "Load Status", "Stage"],
-  driverName: ["Driver", "Driver Name"],
-  unitNumber: ["Unit", "Truck", "Truck #", "Tractor", "Unit Number"],
-  broker: ["Broker", "Customer", "Shipper"]
-};
 
 // URL for your Vercel proxy that handles all AI API calls.
 const PROXY_ENDPOINT = 'https://truck-talk-connect.vercel.app/openai-proxy';
 
-// --- UI Functions ---
-
+/**
+ * Creates the menu in Google Sheets to open the sidebar.
+ */
 function onOpen() {
-  const ui = SpreadsheetApp.getUi();
-  ui.createMenu("TruckTalk Connect")
-    .addItem("Open Chat", "showSidebar")
-    .addToUi();
+  SpreadsheetApp.getUi()
+      .createMenu('TruckTalk Connect')
+      .addItem('Open Chat', 'showSidebar')
+      .addToUi();
 }
 
+/**
+ * Displays the HTML sidebar.
+ */
 function showSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile("ui")
-    .setTitle("TruckTalk Connect")
-    .setWidth(400);
+  const html = HtmlService.createHtmlOutputFromFile('ui')
+      .setTitle('TruckTalk Connect')
+      .setWidth(300);
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
-function selectSheetCell(colName, rowNum) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const colIndex = headerRow.indexOf(colName);
-  
-  if (colIndex !== -1) {
-    sheet.getRange(rowNum, colIndex + 1).activate();
-  } else {
-    throw new Error(`Column with header "${colName}" not found.`);
-  }
-}
-
-// --- Main Chat & Analysis Functions ---
-
 /**
- * Handles all chat messages from the sidebar UI by using AI to determine intent.
- * @param {Object} payload The message object from the UI.
- * @return {Object|string} Analysis result object, a structured message, or a general chat message from the AI.
+ * Handles all incoming messages and commands from the UI.
+ * This function acts as the central router for the bot's logic.
+ * @param {object} payload The data sent from the UI, containing command and message.
+ * @return {object|string} The response to be sent back to the UI.
  */
 function handleChatMessage(payload) {
-  const userMessage = payload.message || '';
+  const userMessage = payload.message;
+  const command = payload.command;
+  const trimmedMessage = userMessage.toLowerCase().trim();
   
+  if (command === 'analyze_sheet') {
+    return processSheetAnalysisCommand();
+  }
+
+  // Handle general chat or other commands
+  return processGeneralChat(userMessage);
+}
+
+/**
+ * Executes the core analysis of the active sheet.
+ * @return {object} A result object containing issues or the generated load data.
+ */
+function processSheetAnalysisCommand() {
+  const analysisResult = analyzeSheet();
+  
+  if (analysisResult.issues.length > 0) {
+    // Correctly returns the full analysis object
+    return analysisResult;
+  }
+  
+  // If no issues, we can return the success message with the loads data
+  return analysisResult;
+}
+
+/**
+ * Processes a general chat message from the user.
+ * @param {string} message The user's message.
+ * @return {string} The bot's chat response.
+ */
+function processGeneralChat(message) {
+  const welcomeMessages = [
+    "Hello! How can I assist you today?",
+    "Hi there! What can I do for you?",
+    "Hello! How can I assist you today with TruckTalk Connect?"
+  ];
+  const greeting = welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
+  return greeting;
+}
+
+/**
+ * Analyzes the active sheet to validate data and find issues.
+ * @return {object} An object with `ok` status and an `issues` array.
+ */
+function analyzeSheet() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const rows = data.slice(1);
-
-  const prompt = {
-    userMessage: userMessage,
-    headers: headers,
-    sampleData: rows.slice(0, 15), // Send a small sample for the AI to analyze.
-    knownSynonyms: HEADER_SYNONYMS,
-    requiredFields: REQUIRED_FIELDS,
-    systemPrompt: `You are an AI assistant for a Google Sheets add-on named "TruckTalk Connect". Your primary goal is to help users validate their logistics data.
-      - **If the user asks to analyze the sheet**: Perform a full analysis. Map headers to the provided required fields and synonyms. Identify and report issues like missing columns, duplicate IDs, invalid dates, or inconsistent statuses. Normalize all dates to ISO 8601 UTC format. Return a JSON object strictly following the 'AnalysisResult' contract.
-      - **If the user is asking for general help**: Provide a helpful, conversational response.
-      - **If the header mapping is ambiguous**: Ask the user for clarification in a conversational manner.
-      - **Important**: Your response MUST be valid JSON if an analysis is performed; otherwise, it should be plain text. Do not include any extra prose outside of the JSON.`
-  };
-
-  try {
-    const response = UrlFetchApp.fetch(PROXY_ENDPOINT, {
-      method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify(prompt)
+  const headers = data.shift();
+  
+  const issues = [];
+  const loads = [];
+  
+  const headerMap = mapHeaders(headers);
+  
+  if (!headerMap.allFound) {
+    issues.push({
+      severity: 'error',
+      message: 'Missing or misspelled required headers.',
+      suggestion: `Please ensure all headers are present: ${REQUIRED_FIELDS.join(', ')}`,
+      action: null
     });
-
-    const textResponse = response.getContentText();
-
-    try {
-      const jsonResponse = JSON.parse(textResponse);
-      // The new logic to check for the structured response from the proxy
-      if (jsonResponse.type === 'suggestion_list') {
-        return jsonResponse;
-      }
+    return { ok: false, issues: issues };
+  }
+  
+  data.forEach((row, rowIndex) => {
+    const load = {};
+    let rowHasError = false;
+    
+    REQUIRED_FIELDS.forEach(field => {
+      const colIndex = headerMap.map[field];
+      const cellValue = row[colIndex];
       
-      if (jsonResponse.issues !== undefined && jsonResponse.mapping !== undefined) {
-        // It's a structured AnalysisResult.
-        return jsonResponse;
+      if (!cellValue || cellValue.toString().trim() === '') {
+        issues.push({
+          severity: 'error',
+          message: `Missing value for required field '${field}'.`,
+          suggestion: `Enter a value in cell ${sheet.getRange(rowIndex + 2, colIndex + 1).getA1Notation()}.`,
+          action: {
+            command: 'selectCell',
+            column: colIndex,
+            row: rowIndex + 2
+          }
+        });
+        rowHasError = true;
+      } else {
+        load[field] = cellValue;
       }
-    } catch (e) {
-      // It's a general conversational response, not JSON.
-      return textResponse;
+    });
+    
+    if (!rowHasError) {
+      loads.push(load);
     }
-    
-    return textResponse;
-    
-  } catch (e) {
-    console.error('API call failed:', e);
-    return 'I am unable to connect to the AI at the moment. Please try again later.';
+  });
+  
+  if (issues.length > 0) {
+    return { ok: false, issues: issues };
+  } else {
+    return { ok: true, issues: [], loads: loads };
   }
 }
 
 /**
- * Handles clicks on the "fix" buttons in the chat, jumping to the relevant cell.
- * @param {Object} action The action object from the UI.
+ * Maps headers in the spreadsheet to the required fields.
+ * @param {string[]} headers The header row from the spreadsheet.
+ * @return {object} An object containing the mapping and a status flag.
+ */
+function mapHeaders(headers) {
+  const map = {};
+  const lowerCaseHeaders = headers.map(h => h.toLowerCase());
+  
+  REQUIRED_FIELDS.forEach(field => {
+    const index = lowerCaseHeaders.indexOf(field.toLowerCase());
+    if (index !== -1) {
+      map[field] = index;
+    }
+  });
+  
+  const allFound = REQUIRED_FIELDS.every(field => map.hasOwnProperty(field));
+  
+  return { map: map, allFound: allFound };
+}
+
+/**
+ * Handles a user-requested fix by executing a predefined action.
+ * @param {object} action The action object from the UI containing a command and parameters.
+ * @return {boolean} True if a fix was applied, false otherwise.
  */
 function handleSuggestionClick(action) {
-  if (action.type === 'jump_to_cell') {
+  if (action && action.command === 'selectCell') {
     selectSheetCell(action.column, action.row);
+    return true; // Return true because a fix was applied
   }
+  return false; // Return false because no fix was applied
+}
+
+/**
+ * Selects a specific cell in the active sheet.
+ * @param {number} colIndex The column index (0-based).
+ * @param {number} rowNum The row number (1-based).
+ */
+function selectSheetCell(colIndex, rowNum) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const cell = sheet.getRange(rowNum, colIndex + 1);
+  sheet.setActiveRange(cell);
 }
