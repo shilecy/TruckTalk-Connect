@@ -144,22 +144,47 @@ function sendDataForAnalysis(userMessage, existingMapping = {}) {
 
   try {
     const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
-    
-    // Check for non-successful HTTP status codes
-    if (response.getResponseCode() !== 200) {
-      return { ok: false, issues: [{ code: "PROXY_ERROR", severity: "error", message: `Proxy server returned an error: HTTP ${response.getResponseCode()} - ${response.getContentText().slice(0, 100)}`, suggestion: "Check the proxy server's logs for more details." }] };
+    const responseText = response.getContentText();
+
+    // Check for an empty or non-JSON response body even if the status is 200
+    if (!responseText || response.getResponseCode() !== 200) {
+      return { 
+        ok: false, 
+        issues: [{ 
+          code: "PROXY_ERROR", 
+          severity: "error", 
+          message: `Proxy server returned an error: HTTP ${response.getResponseCode()}.`, 
+          suggestion: "Please check the proxy server's logs for more details." 
+        }] 
+      };
     }
 
     // Try to parse the JSON response. This is the key fix.
     let result;
     try {
-      result = JSON.parse(response.getContentText());
+      result = JSON.parse(responseText);
     } catch (e) {
-      return { ok: false, issues: [{ code: "INVALID_RESPONSE", severity: "error", message: `Received an invalid response from the proxy server.`, suggestion: "The response was not valid JSON. Check the proxy server's logs." }] };
+      return { 
+        ok: false, 
+        issues: [{ 
+          code: "INVALID_RESPONSE", 
+          severity: "error", 
+          message: `Received an invalid response from the proxy server.`, 
+          suggestion: "The response was not valid JSON. Check the proxy server's logs." 
+        }] 
+      };
     }
 
     if (result.error) {
-      return { ok: false, issues: [{ code: "PROXY_ERROR", severity: "error", message: `Proxy Error: ${result.error}`, suggestion: "Check the Vercel logs for more details." }] };
+      return { 
+        ok: false, 
+        issues: [{ 
+          code: "PROXY_ERROR", 
+          severity: "error", 
+          message: `Proxy Error: ${result.error}`, 
+          suggestion: "Check the Vercel logs for more details." 
+        }] 
+      };
     }
 
     const groupedResult = groupIssues(result);
@@ -170,7 +195,15 @@ function sendDataForAnalysis(userMessage, existingMapping = {}) {
     return groupedResult;
 
   } catch (e) {
-    return { ok: false, issues: [{ code: "NETWORK_ERROR", severity: "error", message: `Could not connect to analysis server: ${e.message}`, suggestion: "Check your internet connection or try again later." }] };
+    return { 
+      ok: false, 
+      issues: [{ 
+        code: "NETWORK_ERROR", 
+        severity: "error", 
+        message: `Could not connect to analysis server: ${e.message}`, 
+        suggestion: "Check your internet connection or try again later." 
+      }] 
+    };
   }
 }
 
