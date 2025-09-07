@@ -94,7 +94,9 @@ app.post(PROXY_ENDPOINT, async (req, res) => {
     });
 
     if (!response.ok) {
-      throw new Error(`OpenAI API request failed with status ${response.status}: ${response.statusText}`);
+      // If the OpenAI API returns an error, log it and return a clean JSON error.
+      const errorText = await response.text();
+      throw new Error(`OpenAI API request failed with status ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();
@@ -118,8 +120,18 @@ app.post(PROXY_ENDPOINT, async (req, res) => {
     res.json(finalResult);
 
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Error in proxy:', error);
+    // Return a structured JSON error, preventing the Google Apps Script from crashing.
+    res.status(200).json({ 
+      ok: false,
+      issues: [{
+        code: "PROXY_ERROR",
+        severity: "error",
+        message: `Internal proxy error: ${error.message}`,
+        suggestion: "Please contact support with this message."
+      }],
+      meta: { analyzedRows: 0, analyzedAt: new Date().toISOString() }
+    });
   }
 });
 

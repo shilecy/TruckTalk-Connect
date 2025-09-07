@@ -145,45 +145,13 @@ function sendDataForAnalysis(userMessage, existingMapping = {}) {
   try {
     const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
     const responseText = response.getContentText();
+    const result = JSON.parse(responseText);
 
-    // Check for an empty or non-JSON response body even if the status is 200
-    if (!responseText || response.getResponseCode() !== 200) {
-      return { 
-        ok: false, 
-        issues: [{ 
-          code: "PROXY_ERROR", 
-          severity: "error", 
-          message: `Proxy server returned an error: HTTP ${response.getResponseCode()}.`, 
-          suggestion: "Please check the proxy server's logs for more details." 
-        }] 
-      };
-    }
-
-    // Try to parse the JSON response. This is the key fix.
-    let result;
-    try {
-      result = JSON.parse(responseText);
-    } catch (e) {
-      return { 
-        ok: false, 
-        issues: [{ 
-          code: "INVALID_RESPONSE", 
-          severity: "error", 
-          message: `Received an invalid response from the proxy server.`, 
-          suggestion: "The response was not valid JSON. Check the proxy server's logs." 
-        }] 
-      };
-    }
-
-    if (result.error) {
-      return { 
-        ok: false, 
-        issues: [{ 
-          code: "PROXY_ERROR", 
-          severity: "error", 
-          message: `Proxy Error: ${result.error}`, 
-          suggestion: "Check the Vercel logs for more details." 
-        }] 
+    if (!result.ok) {
+      return {
+        ok: false,
+        issues: result.issues,
+        message: result.message // Ensure the message field is correctly passed
       };
     }
 
