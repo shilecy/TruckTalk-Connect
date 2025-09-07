@@ -17,7 +17,6 @@ const REQUIRED_FIELDS = [
 ];
 
 // Header synonyms for robust column matching.
-// This is now the fallback for when the AI can't infer a mapping.
 const HEADER_MAPPINGS = {
   loadId: ['loadId', 'load id', 'ref', 'vrid', 'reference', 'ref #'],
   fromAddress: ['fromAddress', 'from', 'pu', 'pickup', 'origin', 'pickup address', 'pickup location'],
@@ -60,12 +59,12 @@ function showSidebar() {
  * @return {object|string} The response to be sent back to the UI.
  */
 function handleChatMessage(payload) {
-  const userMessage = payload.message || "analyze";
+  const userMessage = payload.message;
   const command = payload.command;
-  const trimmedMessage = userMessage.toLowerCase().trim();
   
   if (command === 'analyze_sheet') {
-    // A specific model name is now included for the AI.
+    // The command is now correctly handled by calling the function
+    // that sends data to the proxy, as outlined in the brief.
     return sendDataForAnalysis(userMessage, 'gpt-3.5-turbo');
   } else {
     // This is where you would implement logic to handle user commands like
@@ -125,7 +124,7 @@ function sendDataForAnalysis(userMessage, model) {
 function handleSuggestionClick(action) {
   if (action && action.command === 'selectCell') {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    const headers = sheet.getange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     const colIndex = headers.indexOf(action.column);
     
     if (colIndex !== -1) {
