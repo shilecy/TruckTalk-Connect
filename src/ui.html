@@ -78,30 +78,6 @@
         border-radius: 8px;
         font-size: 14px;
       }
-      .input-container button, .modal-buttons button {
-        padding: 10px 15px;
-        border: none;
-        color: white;
-        border-radius: 8px;
-        cursor: pointer;
-        font-size: 14px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s;
-      }
-      #sendBtn, #reanalyzeBtn, #confirmFixBtn {
-        background-color: limegreen;
-      }
-      #cancelFixBtn {
-        background-color: gray;
-      }
-      #sendBtn:hover, #reanalyzeBtn:hover, #confirmFixBtn:hover {
-        background-color: green;
-      }
-      #cancelFixBtn:hover {
-        background-color: #555;
-      }
       .results-summary {
         font-size: 14px;
         margin-top: 10px;
@@ -285,11 +261,29 @@
 
       let currentFixAction = null;
 
+      function setButtonStyles() {
+        const buttons = [sendBtn, reanalyzeBtn, confirmFixBtn, cancelFixBtn];
+        buttons.forEach(btn => {
+          btn.style.padding = '10px 15px';
+          btn.style.border = 'none';
+          btn.style.backgroundColor = btn.id === 'cancelFixBtn' ? 'gray' : 'limegreen';
+          btn.style.color = 'white';
+          btn.style.borderRadius = '8px';
+          btn.style.cursor = 'pointer';
+          btn.style.fontSize = '14px';
+          btn.style.display = 'flex';
+          btn.style.alignItems = 'center';
+          btn.style.justifyContent = 'center';
+          btn.onmouseover = () => btn.style.backgroundColor = btn.id === 'cancelFixBtn' ? '#555' : 'green';
+          btn.onmouseout = () => btn.style.backgroundColor = btn.id === 'cancelFixBtn' ? 'gray' : 'limegreen';
+        });
+      }
+
       sendBtn.addEventListener('click', () => sendMessage(userInput.value.trim()));
       userInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') sendMessage(userInput.value.trim());
       });
-      reanalyzeBtn.addEventListener('click', () => sendMessage('analyze this tab'));
+      reanalyzeBtn.addEventListener('click', () => sendMessage('analyze_sheet'));
 
       chatTabBtn.addEventListener('click', () => switchTab('chat'));
       resultsTabBtn.addEventListener('click', () => switchTab('results'));
@@ -305,7 +299,7 @@
           messageModal.style.display = 'none';
         }
         if (event.target == fixConfirmModal) {
-          fixConfirmModal.style.display = 'none';
+            fixConfirmModal.style.display = 'none';
         }
       }
 
@@ -341,47 +335,46 @@
         const summaryMessage = `Analysis complete. Found ${result.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`;
         appendMessage('Bot', summaryMessage);
 
-        result.issues.forEach((issue) => {
-          const issueDiv = document.createElement('div');
-          issueDiv.className = `issue ${issue.severity}`;
+        let issueHtml = '';
+        result.issues.forEach((issue, index) => {
+          const isClickable = issue.action !== null;
+          const cursorStyle = isClickable ? 'cursor: pointer;' : 'cursor: default;';
+          const clickableClass = isClickable ? 'clickable' : '';
           
-          let issueContent = `<p><strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}</p>
-                            <p><small>Suggestion: ${issue.suggestion}</small></p>`;
-
-          if (issue.action) {
-              const actionBtn = document.createElement('button');
-              actionBtn.innerText = 'Fix this';
-              actionBtn.style.cssText = 'background-color: #4CAF50; color: white; padding: 10px; border: none; cursor: pointer; border-radius: 4px;';
-              actionBtn.onclick = () => {
-                  currentFixAction = issue.action;
-                  fixConfirmMessage.innerText = `Do you want to apply the following fix?\n\n${issue.message}`;
-                  fixConfirmModal.style.display = 'block';
-              };
-              issueDiv.appendChild(actionBtn);
-          }
-          
-          if (issue.rows && issue.rows.length > 0) {
-              const affectedRowsLinks = issue.rows.map(row => 
-                  `<a href="#" onclick="jumpToCell('${issue.column}', ${row}); return false;" class="issue-cell-link">${row}</a>`
-              ).join(', ');
-              issueContent += `<p><small>Affected Rows: ${affectedRowsLinks}</small></p>`;
-          }
-          
-          issueDiv.innerHTML = issueContent;
-          chatLog.appendChild(issueDiv);
+          issueHtml += `
+            <div class="issue ${issue.severity} ${clickableClass}" style="${cursorStyle}">
+              <p><strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
+              <small>Suggestion: ${issue.suggestion}</small></p>
+              ${issue.rows.length > 0 ? `<p><small>Affected cells: ${issue.rows.length}</small></p>` : ''}
+            </div>
+          `;
         });
+        
+        const issuesContainer = document.createElement('div');
+        issuesContainer.innerHTML = issueHtml;
+        chatLog.appendChild(issuesContainer);
         chatLog.scrollTop = chatLog.scrollHeight;
-      }
       
+        const issueDivs = issuesContainer.querySelectorAll('.issue.clickable');
+        issueDivs.forEach((div, index) => {
+          div.onclick = () => {
+            currentFixAction = result.issues[index].action;
+            fixConfirmMessage.innerText = `Do you want to apply the following fix?\n\n${result.issues[index].message}`;
+            fixConfirmModal.style.display = 'block';
+          };
+        });
+      }
+
       function handleSuggestionClick(action) {
         resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Fixing issue...</p>`;
         
         google.script.run
             .withSuccessHandler(isFixed => {
                 resultsInChatDiv.innerHTML = '';
+                // Only re-analyze if the backend successfully applied a fix
                 if (isFixed) {
                     appendMessage('Bot', `Issue fixed! Running re-analysis to confirm...`);
-                    sendMessage('analyze this tab');
+                    sendMessage('reanalyze');
                 } else {
                     appendMessage('Bot', `That issue cannot be fixed automatically. Please fix it manually.`);
                 }
@@ -406,16 +399,16 @@
             document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
             document.getElementById('previewPushBtn').addEventListener('click', previewPush);
         } else {
-          let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on a link to jump to the affected row.</p>`;
+          let issuesHtml = `<h3⚠️ Issues Found:</h3><p>Click on a link to jump to the cell.</p>`;
           result.issues.forEach(issue => {
-            const affectedRowsLinks = issue.rows.map(row => 
-              `<a href="#" onclick="jumpToCell('${issue.column}', ${row + 1}); return false;" class="issue-cell-link">${row + 1}</a>`
+            const affectedCellsLinks = issue.rows.map(row => 
+              `<a href="#" onclick="selectCell('${issue.column}', ${row + 1}); return false;" class="issue-cell-link">${row + 1}</a>`
             ).join(', ');
             
             issuesHtml += `<div class="issue ${issue.severity}">
               <strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
               <small>Suggestion: ${issue.suggestion}</small>
-              <p>Affected Rows: ${affectedRowsLinks}</p>
+              <p>Affected Cells: ${affectedCellsLinks}</p>
             </div>`;
           });
           resultsContentDiv.innerHTML = issuesHtml;
@@ -444,13 +437,12 @@
         google.script.run
           .withSuccessHandler(response => {
             resultsInChatDiv.innerHTML = '';
-            if (response.ok && response.hasOwnProperty('issues')) {
+            if (typeof response === 'object' && response !== null && 'issues' in response) {
               displayChatAnalysisResult(response);
               displayAnalysisResult(response);
-            } else if (response.ok && response.hasOwnProperty('message')) {
-              appendMessage('Bot', response.message);
             } else {
-              onError({message: response.message || "An unknown error occurred."});
+              const botResponse = (typeof response === 'string' || response instanceof String) ? response : JSON.stringify(response);
+              appendMessage('Bot', botResponse);
             }
           })
           .withFailureHandler(onError)
@@ -459,6 +451,7 @@
       
       function copyJson() {
         const jsonText = document.getElementById('jsonPreview').innerText;
+        // document.execCommand('copy') is the reliable way to copy in an iFrame.
         const textarea = document.createElement('textarea');
         textarea.value = jsonText;
         document.body.appendChild(textarea);
@@ -472,19 +465,19 @@
         }
         document.body.removeChild(textarea);
       }
-
+  
       function previewPush() {
         const loadsJson = document.getElementById('jsonPreview').innerText;
         showMessageModal('Preview of Push Payload:\n\n' + loadsJson);
       }
 
-      function jumpToCell(columnName, rowNum) {
+      function selectCell(columnName, rowNum) {
         google.script.run
             .withSuccessHandler(function() {
                 google.script.host.parent.focus();
             })
             .withFailureHandler(onError)
-            .jumpToCell(columnName, rowNum);
+            .selectSheetCell(columnName, rowNum);
       }
       
       function onError(error) {
@@ -492,6 +485,8 @@
         console.error('An error occurred:', error);
         showMessageModal(`Error: ${error.message}`);
       }
+      
+      document.addEventListener('DOMContentLoaded', setButtonStyles);
     </script>
   </body>
 </html>

@@ -60,30 +60,19 @@ function showSidebar() {
 
 /**
  * Handles all incoming messages and commands from the UI.
+ * This function acts as the central router for the bot's logic.
  * @param {object} payload The data sent from the UI, containing command and message.
  * @return {object|string} The response to be sent back to the UI.
  */
 function handleChatMessage(payload) {
   try {
-    const userProperties = PropertiesService.getUserProperties();
-    const lastState = JSON.parse(userProperties.getProperty('chatState') || '{}');
-
     switch (payload.command) {
       case 'analyze_sheet':
-        userProperties.deleteProperty('chatState');
-        return sendDataForAnalysis(payload.message, lastState.mapping);
+        return sendDataForAnalysis(payload.message, 'gpt-3.5-turbo');
       case 'apply_fix':
-        userProperties.deleteProperty('chatState');
         return applyFix(payload.action);
-      case 'apply_mapping':
-        const newMapping = payload.mapping;
-        lastState.mapping = { ...lastState.mapping, ...newMapping };
-        userProperties.setProperty('chatState', JSON.stringify(lastState));
-        return { message: "Mapping applied. Re-running analysis...", success: true };
-      case 'general_chat':
-        return processGeneralChatWithAI(payload.message);
       default:
-        return processGeneralChat(payload.message);
+        return 'I am an analysis bot. I can help analyze your sheet. Just type "analyze sheet" to get started!';
     }
   } catch (e) {
     Logger.log(e);
@@ -92,86 +81,56 @@ function handleChatMessage(payload) {
 }
 
 /**
- * Sends a general chat message to the AI proxy for a natural language response.
- * @param {string} message The user's message.
- * @return {object} The AI's conversational response.
- */
-function processGeneralChatWithAI(message) {
-  const payload = {
-    chatMessage: message,
-    context: "You are a helpful assistant for the TruckTalk Connect Google Sheets add-on. You help users manage and validate trucking load data. Your responses should be conversational, professional, and directly related to the user's intent within the context of the spreadsheet."
-  };
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(payload)
-  };
-  try {
-    const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
-    const result = JSON.parse(response.getContentText());
-    return { ok: true, message: result.chatResponse };
-  } catch (e) {
-    return { ok: false, message: "Sorry, I'm having trouble connecting to my brain. Please try again later." };
-  }
-}
-
-/**
  * Prepares and sends sheet data to the server-side AI for analysis.
- * @param {string} userMessage The original message from the user.
- * @param {object} existingMapping The mapping from the previous conversation state.
+ * @param {string} userMessage The message from the user.
+ * @param {string} model The AI model to use for the analysis.
  * @return {object} The analysis result from the AI proxy.
  */
-function sendDataForAnalysis(userMessage, existingMapping = {}) {
+function sendDataForAnalysis(userMessage, model) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const dataRange = sheet.getDataRange();
-  const values = dataRange.getValues();
-  const headers = values.shift();
-  const rows = values.slice(0, 200); // Limit rows for performance and payload size
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    return { ok: false, issues: [{ severity: 'error', message: 'No data found in the sheet.', suggestion: 'Please ensure you have at least one header row and one data row.' }] };
+  }
+  
+  const rawHeaders = data[0];
+  const sampleData = data.slice(1, 11); // Send first 10 rows for efficiency
+  
+  // Use HEADER_MAPPINGS to create a robust header map
+  const headerMap = {};
+  rawHeaders.forEach((rawHeader, index) => {
+    for (const key in HEADER_MAPPINGS) {
+      if (HEADER_MAPPINGS[key].includes(rawHeader.toLowerCase().trim())) {
+        headerMap[key] = index;
+        break; // Found a match, move to the next raw header
+      }
+    }
+  });
 
   const payload = {
-    headers: headers,
-    rows: rows,
-    knownSynonyms: HEADER_MAPPINGS,
+    headers: rawHeaders,
+    headerMap: headerMap, // Pass the new robust header map
+    sampleData: sampleData,
+    userMessage: userMessage,
     requiredFields: REQUIRED_FIELDS,
-    userMapping: existingMapping
+    model: model
   };
   
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify(payload)
-  };
-
   try {
-    const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
-    const responseText = response.getContentText();
-    const result = JSON.parse(responseText);
-
-    if (!result.ok) {
-      return {
-        ok: false,
-        issues: result.issues,
-        message: result.message // Ensure the message field is correctly passed
-      };
-    }
-
-    const groupedResult = groupIssues(result);
-
-    const userProperties = PropertiesService.getUserProperties();
-    userProperties.setProperty('lastAnalysisResult', JSON.stringify(groupedResult));
-    
-    return groupedResult;
-
-  } catch (e) {
-    return { 
-      ok: false, 
-      issues: [{ 
-        code: "NETWORK_ERROR", 
-        severity: "error", 
-        message: `Could not connect to analysis server: ${e.message}`, 
-        suggestion: "Check your internet connection or try again later." 
-      }] 
+    const options = {
+      'method': 'post',
+      'contentType': 'application/json',
+      'payload': JSON.stringify(payload)
     };
+    
+    const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
+    const result = JSON.parse(response.getContentText());
+    
+    // Group issues by code and severity for better UI presentation.
+    return groupIssues(result);
+    
+  } catch (e) {
+    return { ok: false, issues: [{ severity: 'error', message: `Server error: ${e.message}`, suggestion: 'Please check your proxy server logs for details.' }] };
   }
 }
 
@@ -187,7 +146,7 @@ function groupIssues(analysisResult) {
   }
   const groupedIssues = {};
   analysisResult.issues.forEach(issue => {
-    const key = `${issue.code}-${issue.column || 'no_column'}`;
+    const key = `${issue.code}-${issue.column}`;
     if (!groupedIssues[key]) {
       groupedIssues[key] = {
         code: issue.code,
@@ -197,14 +156,12 @@ function groupIssues(analysisResult) {
         column: issue.column,
         rows: []
       };
-      if (FIXABLE_ISSUES.has(issue.code) || issue.code === 'MISSING_COLUMN') {
+      if (FIXABLE_ISSUES.has(issue.code)) {
         groupedIssues[key].action = {
           command: `fix_${issue.code.toLowerCase()}`,
           column: issue.column,
           rows: []
         };
-      } else {
-        groupedIssues[key].action = null;
       }
     }
     groupedIssues[key].rows.push(...(issue.rows || []));
@@ -228,12 +185,13 @@ function applyFix(action) {
   const colIndex = headers.indexOf(action.column);
 
   if (colIndex === -1) {
-    return false;
+    return false; // Column not found.
   }
 
   try {
     switch (action.command) {
       case 'fix_invalid_date_format':
+        // Loop through the specified rows and attempt to fix the date format.
         action.rows.forEach(row => {
           const cell = sheet.getRange(row, colIndex + 1);
           const value = cell.getValue();
@@ -246,6 +204,7 @@ function applyFix(action) {
         });
         return true;
       case 'fix_missing_required_field':
+        // In the absence of a value, fill the cell with a placeholder or null.
         action.rows.forEach(row => {
           const cell = sheet.getRange(row, colIndex + 1);
           if (!cell.getValue()) {
@@ -278,11 +237,11 @@ function processGeneralChat(message) {
 }
 
 /**
- * Jumps to the specified cell in the active sheet.
- * @param {string} columnName The header name of the column.
- * @param {number} rowNum The 1-based row number.
+ * Selects a specific cell in the active sheet.
+ * @param {string} columnName The name of the column.
+ * @param {number} rowNum The row number (1-based).
  */
-function jumpToCell(columnName, rowNum) {
+function selectSheetCell(columnName, rowNum) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const colIndex = headers.indexOf(columnName);

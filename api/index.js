@@ -1,139 +1,240 @@
-const express = require('express');
-const fetch = require('node-fetch');
-const cors = require('cors');
+/**
+ * @fileoverview Main Google Apps Script file for the TruckTalk Connect add-on.
+ * Contains core logic for sidebar UI, data analysis, and API communication.
+ */
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+// Global constant for the required header fields based on the provided data schema.
+const REQUIRED_FIELDS = [
+  'loadId',
+  'fromAddress',
+  'fromAppointmentDateTimeUTC',
+  'toAddress',
+  'toAppointmentDateTimeUTC',
+  'status',
+  'driverName',
+  'unitNumber',
+  'broker'
+];
 
-const PROXY_ENDPOINT = '/openai-proxy';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// Header synonyms for robust column matching.
+const HEADER_MAPPINGS = {
+  loadId: ['loadId', 'load id', 'ref', 'vrid', 'reference', 'ref #'],
+  fromAddress: ['fromAddress', 'from', 'pu', 'pickup', 'origin', 'pickup address', 'pickup location'],
+  fromAppointmentDateTimeUTC: ['fromAppointmentDateTimeUTC', 'pu time', 'pickup appt', 'pickup date/time'],
+  toAddress: ['toAddress', 'to', 'drop', 'delivery', 'destination', 'delivery address', 'delivery location'],
+  toAppointmentDateTimeUTC: ['toAppointmentDateTimeUTC', 'del time', 'delivery appt', 'delivery date/time'],
+  status: ['status', 'load status', 'stage', 'load status'],
+  driverName: ['driverName', 'driver', 'driver name', 'driver/carrier'],
+  driverPhone: ['driverPhone', 'phone', 'driver phone', 'contact'],
+  unitNumber: ['unitNumber', 'unit', 'truck', 'truck #', 'tractor', 'unit number'],
+  broker: ['broker', 'customer', 'shipper']
+};
 
-// The core AI analysis endpoint
-app.post(PROXY_ENDPOINT, async (req, res) => {
-  if (!OPENAI_API_KEY) {
-    return res.status(500).json({ error: 'OpenAI API key not set on server.' });
+// Define which issue codes can be fixed automatically by the AI.
+const FIXABLE_ISSUES = new Set([
+  'MISSING_REQUIRED_FIELD',
+  'INVALID_DATE_FORMAT'
+]);
+
+const PROXY_ENDPOINT = "https://us-central1-your-gcp-project-id.cloudfunctions.net/openai-proxy"; // REPLACE WITH YOUR PROXY URL
+
+/**
+ * Creates the menu in Google Sheets to open the sidebar.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+      .createMenu('TruckTalk Connect')
+      .addItem('Open Chat', 'showSidebar')
+      .addToUi();
+}
+
+/**
+ * Displays the HTML sidebar.
+ */
+function showSidebar() {
+  const html = HtmlService.createHtmlOutputFromFile('ui')
+      .setTitle('TruckTalk Connect')
+      .setWidth(300);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+/**
+ * Handles all incoming messages and commands from the UI.
+ * This function acts as the central router for the bot's logic.
+ * @param {object} payload The data sent from the UI, containing command and message.
+ * @return {object|string} The response to be sent back to the UI.
+ */
+function handleChatMessage(payload) {
+  const userMessage = payload.message;
+  const command = payload.command;
+  
+  if (command === 'analyze_sheet') {
+    return sendDataForAnalysis(userMessage, 'gpt-3.5-turbo');
+  } else if (command === 'apply_fix') {
+    return applyFix(payload.action);
+  } else {
+    return processGeneralChat(userMessage);
   }
+}
 
-  const { headers, rows, knownSynonyms, requiredFields, userMapping } = req.body;
-  const systemPrompt = `You are a specialized AI assistant for logistics data. Your task is to analyze a 2D table representing a list of loads and return a single, structured JSON object.
+/**
+ * Prepares and sends sheet data to the server-side AI for analysis.
+ * @param {string} userMessage The message from the user.
+ * @param {string} model The AI model to use for the analysis.
+ * @return {object} The analysis result from the AI proxy.
+ */
+function sendDataForAnalysis(userMessage, model) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    return { ok: false, issues: [{ severity: 'error', message: 'No data found in the sheet.', suggestion: 'Please ensure you have at least one header row and one data row.' }] };
+  }
+  
+  const headers = data[0];
+  const sampleData = data.slice(1, 11); // Send first 10 rows for efficiency
+  
+  const payload = {
+    headers: headers,
+    sampleData: sampleData,
+    userMessage: userMessage,
+    requiredFields: REQUIRED_FIELDS,
+    model: model,
+    headerMappings: HEADER_MAPPINGS
+  };
+  
+  try {
+    const options = {
+      'method': 'post',
+      'contentType': 'application/json',
+      'payload': JSON.stringify(payload)
+    };
     
-    Your output MUST strictly adhere to this JSON schema:
-    {
-      "ok": boolean,
-      "issues": Array<{
-        "code": string,         // e.g., MISSING_COLUMN, BAD_DATE_FORMAT, DUPLICATE_ID
-        "severity": 'error'|'warn',
-        "message": string,       // user-friendly
-        "rows"?: number[],        // affected rows (1-based)
-        "column"?: string,        // header name
-        "suggestion"?: string    // how to fix
-      }>,
-      "loads"?: Array<{
-        "loadId": string;
-        "fromAddress": string;
-        "fromAppointmentDateTimeUTC": string;
-        "toAddress": string;
-        "toAppointmentDateTimeUTC": string;
-        "status": string;
-        "driverName": string;
-        "driverPhone"?: string;
-        "unitNumber": string;
-        "broker": string;
-      }>,
-      "mapping": Record<string,string>, // header→field mapping used
-      "meta": { "analyzedRows": number; "analyzedAt": string; }
+    const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
+    const result = JSON.parse(response.getContentText());
+    
+    // Group issues by code and severity for better UI presentation.
+    return groupIssues(result);
+    
+  } catch (e) {
+    return { ok: false, issues: [{ severity: 'error', message: `Server error: ${e.message}`, suggestion: 'Please check your proxy server logs for details.' }] };
+  }
+}
+
+/**
+ * Groups issues with the same code and message into a single entry,
+ * consolidating affected rows.
+ * @param {object} analysisResult The raw analysis result from the AI.
+ * @return {object} The grouped analysis result.
+ */
+function groupIssues(analysisResult) {
+  if (!analysisResult.issues) {
+    return analysisResult;
+  }
+  const groupedIssues = {};
+  analysisResult.issues.forEach(issue => {
+    const key = `${issue.code}-${issue.column}`;
+    if (!groupedIssues[key]) {
+      groupedIssues[key] = {
+        code: issue.code,
+        severity: issue.severity,
+        message: issue.message,
+        suggestion: issue.suggestion,
+        column: issue.column,
+        rows: []
+      };
+      if (FIXABLE_ISSUES.has(issue.code)) {
+        groupedIssues[key].action = {
+          command: `fix_${issue.code.toLowerCase()}`,
+          column: issue.column,
+          rows: []
+        };
+      }
     }
-    
-    You will perform the following tasks:
-    1.  **Interpret Headers:** Map the user's headers to the standard Load fields using the provided synonyms. If a field has no matching header, report a MISSING_COLUMN error.
-    2.  **Validate Data:**
-        * Required Columns: 'error' if any of the required fields are missing from the mapping.
-        * Duplicate 'loadId': 'error' for any duplicate 'loadId' values.
-        * Empty Cells: 'error' for any empty cells in required fields.
-        * Invalid Datetime: 'error' for non-parsable or timezone-missing dates.
-        * Inconsistent Status: 'warn' and list all unique values for user normalization.
-    3.  **Normalize Values:** Convert all date-time strings to ISO 8601 UTC format. For example, '08/29 2pm MST' becomes '2025-08-29T20:00:00Z'. State assumptions in the message if the timezone is not provided.
-    4.  **Issue Summarization:** For each issue, provide a plain-language 'message' and a 'suggestion' for fixing it.
-    5.  **Fabrication:** Never invent data. If a cell value is missing, leave the corresponding JSON field blank and flag it with an issue.
-    6.  **Return JSON:** Only return the final JSON object. Do not include any other text or explanation outside the JSON.
-    
-    The user's input is a JSON object with the following keys:
-    - 'headers': The header row of the sheet.
-    - 'rows': A small sample of the data for analysis (first 200 rows to save cost).
-    - 'knownSynonyms': The standard synonyms to use for header mapping.
-    - 'requiredFields': The list of required fields.
-    - 'userMapping': An optional, user-defined mapping to use first.
-    
-    Your analysis should be based solely on this provided data.`;
+    groupedIssues[key].rows.push(...(issue.rows || []));
+    if (groupedIssues[key].action) {
+      groupedIssues[key].action.rows.push(...(issue.rows || []));
+    }
+  });
 
-  // The user prompt provides the actual data for the AI to analyze.
-  const userPrompt = `
-    Headers: ${JSON.stringify(headers)}
-    Rows: ${JSON.stringify(rows)}
-    Known Synonyms: ${JSON.stringify(knownSynonyms)}
-    Required Fields: ${JSON.stringify(requiredFields)}
-    User Mapping: ${JSON.stringify(userMapping)}
-    `;
+  analysisResult.issues = Object.values(groupedIssues);
+  return analysisResult;
+}
+
+/**
+ * Applies a fix to the spreadsheet based on the action provided by the UI.
+ * @param {object} action The action object containing the command and data.
+ * @return {boolean} True if the fix was applied, false otherwise.
+ */
+function applyFix(action) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const colIndex = headers.indexOf(action.column);
+
+  if (colIndex === -1) {
+    return false;
+  }
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o", // Or another suitable model
-        response_format: { type: "json_object" },
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      // If the OpenAI API returns an error, log it and return a clean JSON error.
-      const errorText = await response.text();
-      throw new Error(`OpenAI API request failed with status ${response.status}: ${errorText}`);
+    switch (action.command) {
+      case 'fix_invalid_date_format':
+        action.rows.forEach(row => {
+          const cell = sheet.getRange(row, colIndex + 1);
+          const value = cell.getValue();
+          if (typeof value === 'string') {
+            const date = new Date(value);
+            if (!isNaN(date.getTime())) {
+              cell.setValue(date);
+            }
+          }
+        });
+        return true;
+      case 'fix_missing_required_field':
+        action.rows.forEach(row => {
+          const cell = sheet.getRange(row, colIndex + 1);
+          if (!cell.getValue()) {
+            cell.setValue('N/A');
+          }
+        });
+        return true;
+      default:
+        return false;
     }
-
-    const data = await response.json();
-
-    // Check for an empty or unexpected response from OpenAI
-    if (!data.choices || data.choices.length === 0 || !data.choices[0].message || !data.choices[0].message.content) {
-      throw new Error('Received an empty or malformed response from the AI.');
-    }
-
-    const resultJson = JSON.parse(data.choices[0].message.content);
-
-    // Add the meta field before sending the final result back
-    const finalResult = {
-      ...resultJson,
-      meta: {
-        analyzedRows: rows.length,
-        analyzedAt: new Date().toISOString(),
-      }
-    };
-
-    res.json(finalResult);
-
-  } catch (error) {
-    console.error('Error in proxy:', error);
-    // Return a structured JSON error, preventing the Google Apps Script from crashing.
-    res.status(200).json({ 
-      ok: false,
-      issues: [{
-        code: "PROXY_ERROR",
-        severity: "error",
-        message: `Internal proxy error: ${error.message}`,
-        suggestion: "Please contact support with this message."
-      }],
-      meta: { analyzedRows: 0, analyzedAt: new Date().toISOString() }
-    });
+  } catch (e) {
+    console.error(`Failed to apply fix: ${e.message}`);
+    return false;
   }
-});
+}
 
-// For Vercel, we export the app
-module.exports = app;
+/**
+ * Processes a general chat message from the user.
+ * @param {string} message The user's message.
+ * @return {string} The bot's chat response.
+ */
+function processGeneralChat(message) {
+  const welcomeMessages = [
+    "Hello! How can I assist you today?",
+    "Hi there! What can I do for you?",
+    "Hello! How can I assist you today with TruckTalk Connect?"
+  ];
+  const greeting = welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
+  return greeting;
+}
+
+/**
+ * Selects a specific cell in the active sheet.
+ * @param {string} columnName - The header name of the column to select.
+ * @param {number} rowNum - The row number (1-based index).
+ */
+function selectSheetCell(columnName, rowNum) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const colIndex = headers.indexOf(columnName);
+
+  if (colIndex !== -1) {
+    const colNum = colIndex + 1; 
+    const range = sheet.getRange(rowNum, colNum);
+    sheet.setActiveRange(range);
+  } else {
+    Logger.log('Column not found: ' + columnName);
+  }
+}
