@@ -1,255 +1,233 @@
 /**
- * @fileoverview Main Google Apps Script file for the TruckTalk Connect add-on.
- * Contains core logic for sidebar UI, data analysis, and API communication.
- */
-
-// Global constant for the required header fields based on the provided data schema.
-const REQUIRED_FIELDS = [
-  'loadId',
-  'fromAddress',
-  'fromAppointmentDateTimeUTC',
-  'toAddress',
-  'toAppointmentDateTimeUTC',
-  'status',
-  'driverName',
-  'unitNumber',
-  'broker'
-];
-
-// Header synonyms for robust column matching.
-const HEADER_MAPPINGS = {
-  loadId: ['loadId', 'load id', 'ref', 'vrid', 'reference', 'ref #'],
-  fromAddress: ['fromAddress', 'from', 'pu', 'pickup', 'origin', 'pickup address', 'pickup location'],
-  fromAppointmentDateTimeUTC: ['fromAppointmentDateTimeUTC', 'pu time', 'pickup appt', 'pickup date/time'],
-  toAddress: ['toAddress', 'to', 'drop', 'delivery', 'destination', 'delivery address', 'delivery location'],
-  toAppointmentDateTimeUTC: ['toAppointmentDateTimeUTC', 'del time', 'delivery appt', 'delivery date/time'],
-  status: ['status', 'load status', 'stage', 'load status'],
-  driverName: ['driverName', 'driver', 'driver name', 'driver/carrier'],
-  driverPhone: ['driverPhone', 'phone', 'driver phone', 'contact'],
-  unitNumber: ['unitNumber', 'unit', 'truck', 'truck #', 'tractor', 'unit number'],
-  broker: ['broker', 'customer', 'shipper']
-};
-
-// Define which issue codes can be fixed automatically by the AI.
-const FIXABLE_ISSUES = new Set([
-  'MISSING_REQUIRED_FIELD',
-  'INVALID_DATE_FORMAT'
-]);
-
-const PROXY_ENDPOINT = "https://truck-talk-connect.vercel.app/openai-proxy";
-
-/**
- * Creates the menu in Google Sheets to open the sidebar.
+ * Opens the sidebar when add-on is launched
  */
 function onOpen() {
   SpreadsheetApp.getUi()
-      .createMenu('TruckTalk Connect')
-      .addItem('Open Chat', 'showSidebar')
-      .addToUi();
+    .createMenu("TruckTalk Connect")
+    .addItem("Open Sidebar", "showSidebar")
+    .addToUi();
 }
 
-/**
- * Displays the HTML sidebar.
- */
 function showSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('ui')
-      .setTitle('TruckTalk Connect')
-      .setWidth(300);
+  const html = HtmlService.createHtmlOutputFromFile("ui.html")
+    .setTitle("TruckTalk Connect");
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
+// Required fields (driverPhone optional)
+const REQUIRED_FIELDS = [
+  "loadId",
+  "fromAddress",
+  "fromAppointmentDateTimeUTC",
+  "toAddress",
+  "toAppointmentDateTimeUTC",
+  "status",
+  "driverName",
+  "unitNumber",
+  "broker"
+];
+
+// Known header synonyms
+const HEADER_MAPPINGS = {
+  loadId: ["Load ID", "Ref", "VRID", "Reference", "Ref #"],
+  fromAddress: ["From", "PU", "Pickup", "Origin", "Pickup Address"],
+  fromAppointmentDateTimeUTC: ["PU Time", "Pickup Appt", "Pickup Date/Time"],
+  toAddress: ["To", "Drop", "Delivery", "Destination", "Delivery Address"],
+  toAppointmentDateTimeUTC: ["DEL Time", "Delivery Appt", "Delivery Date/Time"],
+  status: ["Status", "Load Status", "Stage"],
+  driverName: ["Driver", "Driver Name", "Carrier"],
+  driverPhone: ["Phone", "Driver Phone", "Contact"],
+  unitNumber: ["Unit", "Truck", "Truck #", "Tractor", "Unit Number"],
+  broker: ["Broker", "Customer", "Shipper"]
+};
+
 /**
- * Handles all incoming messages and commands from the UI.
- * This function acts as the central router for the bot's logic.
- * @param {object} payload The data sent from the UI, containing command and message.
- * @return {object|string} The response to be sent back to the UI.
+ * Central entry point for UI messages
  */
 function handleChatMessage(payload) {
   try {
-    switch (payload.command) {
-      case 'analyze_sheet':
-        return sendDataForAnalysis(payload.message, 'gpt-3.5-turbo');
-      case 'apply_fix':
-        return applyFix(payload.action);
-      default:
-        return 'I am an analysis bot. I can help analyze your sheet. Just type "analyze sheet" to get started!';
+    if (payload.command === "analyze_sheet") {
+      return analyzeActiveSheet();
     }
-  } catch (e) {
-    Logger.log(e);
-    return `Error: ${e.message}`;
+    if (payload.command === "apply_fix") {
+      // Optional: implement auto-fix logic
+      return false;
+    }
+    return "💡 You can type 'analyze' to analyze the sheet.";
+  } catch (err) {
+    return { ok: false, issues: [{ code: "ERROR", severity: "error", message: err.message }] };
   }
 }
 
 /**
- * Prepares and sends sheet data to the server-side AI for analysis.
- * @param {string} userMessage The message from the user.
- * @param {string} model The AI model to use for the analysis.
- * @return {object} The analysis result from the AI proxy.
+ * Read sheet data and run analysis
  */
-function sendDataForAnalysis(userMessage, model) {
+function analyzeActiveSheet() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const data = sheet.getDataRange().getValues();
+
   if (data.length < 2) {
-    return { ok: false, issues: [{ severity: 'error', message: 'No data found in the sheet.', suggestion: 'Please ensure you have at least one header row and one data row.' }] };
+    return {
+      ok: false,
+      issues: [{
+        code: "NO_DATA",
+        severity: "error",
+        message: "Sheet has no data rows."
+      }],
+      mapping: {},
+      meta: { analyzedRows: 0, analyzedAt: new Date().toISOString() }
+    };
   }
-  
-  const rawHeaders = data[0];
-  const sampleData = data.slice(1, 11); // Send first 10 rows for efficiency
-  
-  // Use HEADER_MAPPINGS to create a robust header map
-  const headerMap = {};
-  rawHeaders.forEach((rawHeader, index) => {
-    for (const key in HEADER_MAPPINGS) {
-      if (HEADER_MAPPINGS[key].includes(rawHeader.toLowerCase().trim())) {
-        headerMap[key] = index;
-        break; // Found a match, move to the next raw header
-      }
+
+  const headers = data[0];
+  const rows = data.slice(1);
+
+  // Call AI
+  const result = callOpenAI(headers, rows);
+
+  // Group duplicate issues
+  result.issues = groupIssues(result.issues || []).map(issue => ({
+    ...issue,
+    suggestion: issue.suggestion || "Please review and update the sheet manually."
+  }));
+
+  return result;
+}
+
+/**
+ * Groups duplicate issues by code+column
+ */
+function groupIssues(issues) {
+  const grouped = {};
+  issues.forEach(issue => {
+    const key = issue.code + "|" + (issue.column || "");
+    if (!grouped[key]) {
+      grouped[key] = { ...issue, rows: issue.rows ? [...issue.rows] : [] };
+    } else {
+      grouped[key].rows = [
+        ...new Set([...(grouped[key].rows || []), ...(issue.rows || [])])
+      ];
     }
   });
+  return Object.values(grouped);
+}
+
+/**
+ * Calls OpenAI API with sheet snapshot
+ */
+function callOpenAI(rawHeaders, sampleData) {
+  const systemPrompt = `
+You convert a 2D table of logistics loads into a typed JSON array and report validation issues.
+Rules:
+- Never invent data. Unknowns must stay blank and flagged as issues.
+- Dates must be ISO 8601 UTC.
+- Detect missing required columns, duplicate loadId, invalid datetimes, empty required cells, inconsistent statuses.
+- Normalize header synonyms.
+Return JSON strictly as:
+{
+  ok: boolean,
+  issues: Array<{
+    code: string,
+    severity: "error"|"warn",
+    message: string,
+    rows?: number[],
+    column?: string,
+    suggestion?: string
+  }>,
+  loads?: any[],
+  mapping: Record<string,string>,
+  meta: { analyzedRows: number, analyzedAt: string }
+}
+  `;
 
   const payload = {
     headers: rawHeaders,
-    headerMap: headerMap, // Pass the new robust header map
-    sampleData: sampleData,
-    userMessage: userMessage,
+    rows: sampleData,
     requiredFields: REQUIRED_FIELDS,
-    model: model
+    knownSynonyms: HEADER_MAPPINGS
   };
-  
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Bearer " + getOpenAIKey()
+    },
+    payload: JSON.stringify({
+      model: "gpt-4.1-mini", // or gpt-3.5-turbo for cheaper
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: JSON.stringify(payload) }
+      ],
+      temperature: 0
+    }),
+    muteHttpExceptions: true
+  };
+
   try {
-    const options = {
-      'method': 'post',
-      'contentType': 'application/json',
-      'payload': JSON.stringify(payload)
+    const response = UrlFetchApp.fetch("https://api.openai.com/v1/chat/completions", options);
+    const data = JSON.parse(response.getContentText());
+
+    if (!data.choices || !data.choices[0].message) {
+      throw new Error("No response from OpenAI");
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(data.choices[0].message.content);
+    } catch (e) {
+      throw new Error("AI did not return valid JSON: " + e.message);
+    }
+
+    // Attach meta
+    parsed.meta = {
+      analyzedRows: sampleData.length,
+      analyzedAt: new Date().toISOString()
     };
-    
-    const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
-    const result = JSON.parse(response.getContentText());
-    
-    // Group issues by code and severity for better UI presentation.
-    return groupIssues(result);
-    
-  } catch (e) {
-    return { ok: false, issues: [{ severity: 'error', message: `Server error: ${e.message}`, suggestion: 'Please check your proxy server logs for details.' }] };
+
+    return parsed;
+  } catch (err) {
+    return {
+      ok: false,
+      issues: [{
+        code: "SERVER_ERROR",
+        severity: "error",
+        message: err.message
+      }],
+      mapping: {},
+      meta: { analyzedRows: 0, analyzedAt: new Date().toISOString() }
+    };
   }
 }
 
 /**
- * Groups issues with the same code and message into a single entry,
- * consolidating affected rows.
- * @param {object} analysisResult The raw analysis result from the AI.
- * @return {object} The grouped analysis result.
- */
-function groupIssues(analysisResult) {
-  if (!analysisResult.issues) {
-    return analysisResult;
-  }
-  const groupedIssues = {};
-  analysisResult.issues.forEach(issue => {
-    const key = `${issue.code}-${issue.column}`;
-    if (!groupedIssues[key]) {
-      groupedIssues[key] = {
-        code: issue.code,
-        severity: issue.severity,
-        message: issue.message,
-        suggestion: issue.suggestion,
-        column: issue.column,
-        rows: []
-      };
-      if (FIXABLE_ISSUES.has(issue.code)) {
-        groupedIssues[key].action = {
-          command: `fix_${issue.code.toLowerCase()}`,
-          column: issue.column,
-          rows: []
-        };
-      }
-    }
-    groupedIssues[key].rows.push(...(issue.rows || []));
-    if (groupedIssues[key].action) {
-      groupedIssues[key].action.rows.push(...(issue.rows || []));
-    }
-  });
-
-  analysisResult.issues = Object.values(groupedIssues);
-  return analysisResult;
-}
-
-/**
- * Applies a fix to the spreadsheet based on the action provided by the AI.
- * @param {object} action The action object containing the command and data.
- * @return {boolean} True if the fix was applied, false otherwise.
- */
-function applyFix(action) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const colIndex = headers.indexOf(action.column);
-
-  if (colIndex === -1) {
-    return false; // Column not found.
-  }
-
-  try {
-    switch (action.command) {
-      case 'fix_invalid_date_format':
-        // Loop through the specified rows and attempt to fix the date format.
-        action.rows.forEach(row => {
-          const cell = sheet.getRange(row, colIndex + 1);
-          const value = cell.getValue();
-          if (typeof value === 'string') {
-            const date = new Date(value);
-            if (!isNaN(date.getTime())) {
-              cell.setValue(date);
-            }
-          }
-        });
-        return true;
-      case 'fix_missing_required_field':
-        // In the absence of a value, fill the cell with a placeholder or null.
-        action.rows.forEach(row => {
-          const cell = sheet.getRange(row, colIndex + 1);
-          if (!cell.getValue()) {
-            cell.setValue('N/A');
-          }
-        });
-        return true;
-      default:
-        return false;
-    }
-  } catch (e) {
-    console.error(`Failed to apply fix: ${e.message}`);
-    return false;
-  }
-}
-
-/**
- * Processes a general chat message from the user.
- * @param {string} message The user's message.
- * @return {string} The bot's chat response.
- */
-function processGeneralChat(message) {
-  const welcomeMessages = [
-    "Hello! How can I assist you today?",
-    "Hi there! What can I do for you?",
-    "Hello! How can I assist you today with TruckTalk Connect?"
-  ];
-  const greeting = welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
-  return greeting;
-}
-
-/**
- * Selects a specific cell in the active sheet.
- * @param {string} columnName The name of the column.
- * @param {number} rowNum The row number (1-based).
+ * Select a specific cell in the sheet
  */
 function selectSheetCell(columnName, rowNum) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const colIndex = headers.indexOf(columnName);
+  const headers = sheet.getDataRange().getValues()[0].map(h => (h || '').toString().trim().toLowerCase());
+  const target = (columnName || '').toLowerCase();
 
-  if (colIndex > -1) {
-    const range = sheet.getRange(rowNum, colIndex + 1);
-    sheet.setActiveRange(range);
-  } else {
-    throw new Error(`Column not found: ${columnName}`);
+  let colIndex = headers.indexOf(target);
+
+  if (colIndex === -1) {
+    // No exact match: select the whole row
+    const range = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn());
+    SpreadsheetApp.setActiveRange(range);
+    return;
   }
+
+  colIndex = colIndex + 1; // convert 0-based to 1-based
+  const range = sheet.getRange(rowNum, colIndex);
+  SpreadsheetApp.setActiveRange(range);
+}
+
+/**
+ * Retrieve OpenAI API key from Script Properties
+ */
+function getOpenAIKey() {
+  const props = PropertiesService.getScriptProperties();
+  const key = props.getProperty("OPENAI_API_KEY");
+  if (!key) throw new Error("Missing OpenAI API key. Set OPENAI_API_KEY in Script Properties.");
+  return key;
 }
