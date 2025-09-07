@@ -13,7 +13,7 @@ app.get('/', (req, res) => {
 
 // The single, unified endpoint that handles both chat and analysis.
 app.post('/openai-proxy', async (req, res) => {
-  const { userMessage, headers, sampleData } = req.body;
+  const { userMessage, headers, sampleData, requiredFields } = req.body;
   const openaiApiKey = process.env.OPENAI_API_KEY;
 
   if (!openaiApiKey) {
@@ -30,11 +30,13 @@ app.post('/openai-proxy', async (req, res) => {
     1. **Header Mapping:** Map the user's headers to the canonical 'Load' schema fields. Use the provided 'HEADER_SYNONYMS'.
     2. **Data Validation & Normalization:**
       * **Dates:** All date fields MUST be converted to ISO 8601 UTC format.
-      * **Required Fields:** All fields in the Load schema are required.
+      * **Required Fields:** All fields in the provided 'requiredFields' list are mandatory.
       * **Uniqueness:** 'loadId' must be unique.
     3. **NEVER FABRICATE DATA:** If a value is unknown or invalid, its corresponding JSON field must be \`null\`, and you must generate an issue.
     4. **Issue Column:** The 'column' property for each issue MUST be the original header name from the user's sheet.
     5. **Output:** Your entire response MUST be a single, valid JSON object that strictly adheres to the 'AnalysisResult' schema.
+    6. **STRICT FIELD LIST:** Only report on the fields present in the 'requiredFields' list. Do not add or infer any other fields like 'Equipment types' unless explicitly asked.
+    
     \`\`\`json
     {
       "HEADER_SYNONYMS": {
@@ -46,7 +48,8 @@ app.post('/openai-proxy', async (req, res) => {
         "status": ["Status", "Load Status", "Stage"],
         "driverName": ["Driver", "Driver Name"],
         "unitNumber": ["Unit", "Truck", "Truck #", "Tractor", "Unit Number"],
-        "broker": ["Broker", "Customer", "Shipper"]
+        "broker": ["Broker", "Customer", "Shipper"],
+        "equipmentTypes": ["equipment types", "equipment", "eqp"]
       },
       "AnalysisResultSchema": {
         "ok": "boolean",
@@ -66,7 +69,6 @@ app.post('/openai-proxy', async (req, res) => {
     let openaiResponse;
     let finalPayload;
 
-    // Check for the presence of headers and sample data to determine intent.
     if (headers && sampleData) {
       finalPayload = {
         model: 'gpt-4o',
@@ -75,7 +77,8 @@ app.post('/openai-proxy', async (req, res) => {
           content: analysisPrompt
         }, {
           role: 'user',
-          content: `Analyze the headers and data below and return a single JSON object conforming to the schema.
+          content: `Analyze the headers and data below based on the provided required fields and return a single JSON object conforming to the schema.
+            Required Fields: ${JSON.stringify(requiredFields)}
             Headers: ${JSON.stringify(headers)}
             Sample Data: ${JSON.stringify(sampleData)}`
         }],
@@ -104,7 +107,8 @@ app.post('/openai-proxy', async (req, res) => {
     });
 
     if (!openaiResponse.ok) {
-      throw new Error(`OpenAI API error: ${openaiResponse.statusText}`);
+      const errorData = await openaiResponse.json();
+      throw new Error(`OpenAI API error: ${openaiResponse.statusText} - ${JSON.stringify(errorData)}`);
     }
 
     const data = await openaiResponse.json();
@@ -114,7 +118,18 @@ app.post('/openai-proxy', async (req, res) => {
       const jsonResult = JSON.parse(botResponse);
       return res.status(200).json(jsonResult);
     } catch (e) {
-      return res.status(200).send(botResponse);
+      // If the AI response is not valid JSON, return a structured error.
+      return res.status(200).json({
+        ok: false,
+        issues: [{
+          code: 'INVALID_AI_RESPONSE',
+          severity: 'error',
+          message: 'The AI returned an invalid response. Please try again.',
+          suggestion: 'If the problem persists, check the proxy server logs.'
+        }],
+        mapping: {},
+        meta: { analyzedRows: 0, analyzedAt: new Date().toISOString() }
+      });
     }
 
   } catch (error) {
