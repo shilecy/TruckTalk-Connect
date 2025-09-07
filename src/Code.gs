@@ -59,17 +59,15 @@ function showSidebar() {
  * @param {object} payload The data sent from the UI, containing command and message.
  * @return {object|string} The response to be sent back to the UI.
  */
+
 function handleChatMessage(payload) {
-  const userMessage = payload.message;
+  const userMessage = payload.message || "analyze"; // Provide a default message if payload.message is empty
   const command = payload.command;
   const trimmedMessage = userMessage.toLowerCase().trim();
   
   if (command === 'analyze_sheet') {
-    return sendDataForAnalysis();
+    return sendDataForAnalysis(userMessage); // Pass the message to the analysis function
   } else {
-    // This is where you would implement logic to handle user commands like
-    // "Use DEL Time for delivery appt."
-    // For now, it will just return a generic response.
     return processGeneralChat(userMessage);
   }
 }
@@ -78,7 +76,8 @@ function handleChatMessage(payload) {
  * Prepares and sends sheet data to the server-side AI for analysis.
  * @return {object} The analysis result from the AI proxy.
  */
-function sendDataForAnalysis() {
+
+function sendDataForAnalysis(userMessage) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) {
@@ -91,7 +90,8 @@ function sendDataForAnalysis() {
   const payload = {
     headers: headers,
     sampleData: sampleData,
-    requiredFields: REQUIRED_FIELDS
+    requiredFields: REQUIRED_FIELDS,
+    userMessage: userMessage // Pass the message in the payload
   };
   
   try {

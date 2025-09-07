@@ -80,16 +80,11 @@ app.post('/openai-proxy', async (req, res) => {
       })
     });
     
-    // Log the raw response status and text for debugging
-    console.log('OpenAI Intent API Response Status:', intentResponse.status);
-    const intentText = await intentResponse.text();
-    console.log('OpenAI Intent API Response Body:', intentText);
-
     if (!intentResponse.ok) {
         throw new Error('Failed to get intent from OpenAI.');
     }
 
-    const intentData = JSON.parse(intentText);
+    const intentData = await intentResponse.json();
     const intent = intentData.choices[0].message.content.trim().toLowerCase();
     
     let openaiResponse;
@@ -140,29 +135,16 @@ app.post('/openai-proxy', async (req, res) => {
     try {
         const jsonResult = JSON.parse(botResponse);
         // It's a structured analysis result.
-        
-        // This is the new logic for handling a structured response.
-        // It checks if there are issues and returns a structured response for the UI to handle.
-        if (jsonResult.ok === false && jsonResult.issues && jsonResult.issues.length > 0) {
-            return res.status(200).json({
-                type: 'suggestion_list',
-                message: 'Analysis complete. Found issues:',
-                issues: jsonResult.issues.map(issue => ({
-                    message: `[${issue.severity.toUpperCase()}] ${issue.message}`,
-                    suggestion: issue.suggestion,
-                    action: {
-                        type: 'jump_to_cell',
-                        column: issue.column,
-                        row: issue.rows[0] // Assuming one row per issue for this example
-                    }
-                }))
-            });
-        }
-        
+        // The key is to return the parsed JSON result directly, which matches the UI's expected schema.
         return res.status(200).json(jsonResult);
     } catch (e) {
         // It's a general conversational response.
-        return res.status(200).send(botResponse);
+        return res.status(200).json({
+          ok: true,
+          issues: [],
+          loads: null,
+          message: botResponse // Send the message in a structured format
+        });
     }
     
   } catch (error) {
