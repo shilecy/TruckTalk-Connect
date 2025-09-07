@@ -3,160 +3,111 @@ const cors = require('cors');
 const fetch = require('node-fetch');
 
 const app = express();
+
+// A simple in-memory cache to store generated results and avoid re-generation.
+const cache = new Map();
+
+// Vercel deployment requires a specific port, often provided by process.env.PORT.
+const port = process.env.PORT || 3000;
+
+// Configure CORS to allow requests from any origin.
+// This is critical for web apps to communicate with the Vercel backend.
+const corsOptions = {
+    origin: '*', // Allow all origins for simplicity in a public API
+    methods: ['POST', 'GET', 'OPTIONS'], // Explicitly allow POST, GET, and OPTIONS methods
+    allowedHeaders: ['Content-Type', 'Authorization'], // Allow these headers
+    credentials: true,
+};
+
+// Use the configured CORS middleware.
+app.use(cors(corsOptions));
+// Use express.json() to parse incoming JSON payloads.
 app.use(express.json());
-app.use(cors());
 
-// A root route to confirm the server is running.
-app.get('/', (req, res) => {
-  res.status(200).send('TruckTalk Connect AI Proxy is running.');
-});
-
-// New GET handler to provide a helpful message for misdirected requests.
-app.get('/openai-proxy', (req, res) => {
-  res.status(405).json({
-    error: 'Method Not Allowed',
-    message: 'This endpoint only accepts POST requests for data analysis or chat. Please send a POST request with the required body.'
-  });
-});
-
-// The single, unified endpoint that handles both chat and analysis.
+// Main route for processing OpenAI requests.
 app.post('/openai-proxy', async (req, res) => {
-  const { userMessage, headers, sampleData } = req.body;
-  const openaiApiKey = process.env.OPENAI_API_KEY;
-
-  if (!openaiApiKey) {
-    return res.status(500).json({ error: 'OpenAI API key not set on server.' });
-  }
-
-  // Define prompts for different intents
-  const analysisPrompt = `
-    You are an expert data analyst AI for "TruckTalk Connect". Your task is to analyze spreadsheet data for truck loads, validate it, and convert it into a structured JSON format.
-
-    **Your Goal:** Return a single JSON object that strictly matches the 'AnalysisResult' schema.
-    **Core Rules:**
-    1. **Header Mapping:** Map the user's headers to the canonical 'Load' schema fields. Use the provided 'HEADER_SYNONYMS'.
-    2. **Data Validation & Normalization:**
-      * **Dates:** All date fields MUST be converted to ISO 8601 UTC format.
-      * **Required Fields:** All fields in the Load schema are required.
-      * **Uniqueness:** 'loadNumber' must be unique.
-    3. **NEVER FABRICATE DATA:** If a value is unknown or invalid, its corresponding JSON field must be \`null\`, and you must generate an issue.
-    4. **Issue Details:** For each issue, you MUST include 'severity', 'message', 'suggestion', 'rows', 'column', and an optional 'action' object if the issue is fixable by jumping to a specific cell.
-    5. **Action Object:** If an issue requires a user to look at a specific cell, the 'action' object MUST be structured as: \`{ "command": "selectCell", "column": "<Original Header Name>", "row": <Row Number> }\`
-    6. **Output:** Your entire response MUST be a single, valid JSON object that strictly adheres to the 'AnalysisResult' schema.
-    
-    \`\`\`json
-    {
-      "HEADER_SYNONYMS": {
-        "loadId": ["Load ID", "Ref", "VRID", "Reference", "Ref #"],
-        "fromAddress": ["From", "PU", "Pickup", "Origin", "Pickup Address"],
-        "fromAppointmentDateTimeUTC": ["PU Time", "Pickup Appt", "Pickup Date/Time"],
-        "toAddress": ["To", "Drop", "Delivery", "Destination", "Delivery Address"],
-        "toAppointmentDateTimeUTC": ["DEL Time", "Delivery Appt", "Delivery Date/Time"],
-        "status": ["Status", "Load Status", "Stage"],
-        "driverName": ["Driver", "Driver Name"],
-        "unitNumber": ["Unit", "Truck", "Truck #", "Tractor", "Unit Number"],
-        "broker": ["Broker", "Customer", "Shipper"]
-      },
-      "AnalysisResultSchema": {
-        "ok": "boolean",
-        "issues": [{"severity": "'error'|'warn'", "message": "string", "suggestion": "string", "rows": "number[]", "column": "string (Original Header Name)", "action": {"command": "string", "column": "string", "row": "number"}}],
-        "loads": "Load[] | undefined",
-        "mapping": "{ originalHeader: canonicalField, ... }"
-      }
+    // Acknowledge the OPTIONS preflight request immediately
+    // to avoid potential CORS errors on the client side.
+    if (req.method === 'OPTIONS') {
+        res.status(200).send();
+        return;
     }
-    \`\`\`
-    `;
-
-  const generalChatPrompt = `You are a helpful AI assistant for "TruckTalk Connect". You are designed to answer questions and provide general information about the add-on. Be concise and friendly.`;
-
-  try {
-    // First, determine the user's intent with a light-weight model
-    const intentResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openaiApiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
-        messages: [{
-          role: 'system',
-          content: 'You are an intent detection AI. Analyze the user\'s message. If they are asking for data analysis or validation, respond with "analyze". For any other message, respond with "chat". Respond with only one word.'
-        }, {
-          role: 'user',
-          content: userMessage
-        }]
-      })
-    });
-    
-    if (!intentResponse.ok) {
-        throw new Error('Failed to get intent from OpenAI.');
-    }
-
-    const intentData = await intentResponse.json();
-    const intent = intentData.choices[0].message.content.trim().toLowerCase();
-    
-    let openaiResponse;
-    let finalPayload;
-
-    if (intent === 'analyze') {
-      finalPayload = {
-        model: 'gpt-4o',
-        messages: [{
-          role: 'system',
-          content: analysisPrompt
-        }, {
-          role: 'user',
-          content: `Analyze the headers and data below. If there are no errors, provide the parsed JSON. If there are errors, provide the issues array.\n\nHeaders: ${JSON.stringify(headers)}\nSample Data: ${JSON.stringify(sampleData)}`
-        }],
-        response_format: { type: 'json_object' }
-      };
-    } else {
-      finalPayload = {
-        model: 'gpt-3.5-turbo',
-        messages: [{
-          role: 'system',
-          content: generalChatPrompt
-        }, {
-          role: 'user',
-          content: userMessage
-        }]
-      };
-    }
-
-    // Now, call OpenAI with the correct payload based on intent
-    openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openaiApiKey}`
-      },
-      body: JSON.stringify(finalPayload)
-    });
-
-    if (!openaiResponse.ok) {
-      throw new Error(`OpenAI API error: ${openaiResponse.statusText}`);
-    }
-
-    const data = await openaiResponse.json();
-    const botResponse = data.choices[0].message.content;
 
     try {
-        const jsonResult = JSON.parse(botResponse);
-        return res.status(200).json(jsonResult);
-    } catch (e) {
-        return res.status(200).json({
-          ok: true,
-          issues: [],
-          loads: null,
-          message: botResponse
+        const { prompt, model, useCache } = req.body;
+
+        // Check if a response for this prompt and model is already in the cache.
+        const cacheKey = `${model}:${prompt}`;
+        if (useCache && cache.has(cacheKey)) {
+            console.log("Serving from cache.");
+            return res.status(200).json({
+                text: cache.get(cacheKey),
+                fromCache: true
+            });
+        }
+
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+            console.error("OPENAI_API_KEY environment variable is not set.");
+            return res.status(500).json({
+                error: "Server configuration error: OpenAI API key is missing."
+            });
+        }
+
+        const openAIResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model: model,
+                messages: [{ role: 'user', content: prompt }],
+            }),
+        });
+
+        if (!openAIResponse.ok) {
+            const errorText = await openAIResponse.text();
+            console.error(`OpenAI API request failed with status ${openAIResponse.status}: ${errorText}`);
+            return res.status(openAIResponse.status).json({
+                error: `OpenAI API error: ${errorText}`
+            });
+        }
+
+        const data = await openAIResponse.json();
+        const generatedText = data.choices[0].message.content.trim();
+
+        // Store the new result in the cache.
+        if (useCache) {
+            cache.set(cacheKey, generatedText);
+            console.log("Response cached.");
+        }
+
+        res.status(200).json({
+            text: generatedText,
+            fromCache: false
+        });
+
+    } catch (error) {
+        console.error("Server error during OpenAI proxy request:", error);
+        res.status(500).json({
+            error: `Internal server error: ${error.message}`
         });
     }
-    
-  } catch (error) {
-    console.error("Proxy Error:", error);
-    res.status(500).json({ error: 'Failed to communicate with the OpenAI API.' });
-  }
+});
+
+// Catch-all route for requests to other paths or with unsupported methods.
+app.all('*', (req, res) => {
+    // This provides a helpful error message for methods other than POST, GET, and OPTIONS.
+    res.status(405).json({
+        error: 'Method Not Allowed',
+        message: `This endpoint only accepts POST requests for data analysis or chat. The requested path is ${req.path}.`
+    });
+});
+
+// Start the server. Vercel automatically handles this with a serverless function.
+app.listen(port, () => {
+    console.log(`Server listening at http://localhost:${port}`);
 });
 
 module.exports = app;
