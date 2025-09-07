@@ -32,8 +32,9 @@ app.post('/openai-proxy', async (req, res) => {
       * **Required Fields:** All fields in the Load schema are required.
       * **Uniqueness:** 'loadNumber' must be unique.
     3. **NEVER FABRICATE DATA:** If a value is unknown or invalid, its corresponding JSON field must be \`null\`, and you must generate an issue.
-    4. **Issue Column:** The 'column' property for each issue MUST be the original header name from the user's sheet.
-    5. **Output:** Your entire response MUST be a single, valid JSON object that strictly adheres to the 'AnalysisResult' schema.
+    4. **Issue Details:** For each issue, you MUST include 'severity', 'message', 'suggestion', 'rows', 'column', and an optional 'action' object if the issue is fixable by jumping to a specific cell.
+    5. **Action Object:** If an issue requires a user to look at a specific cell, the 'action' object MUST be structured as: \`{ "command": "selectCell", "column": "<Original Header Name>", "row": <Row Number> }\`
+    6. **Output:** Your entire response MUST be a single, valid JSON object that strictly adheres to the 'AnalysisResult' schema.
     
     \`\`\`json
     {
@@ -50,7 +51,7 @@ app.post('/openai-proxy', async (req, res) => {
       },
       "AnalysisResultSchema": {
         "ok": "boolean",
-        "issues": [{"severity": "'error'|'warn'", "message": "string", "suggestion": "string", "rows": "number[]", "column": "string (Original Header Name)"}],
+        "issues": [{"severity": "'error'|'warn'", "message": "string", "suggestion": "string", "rows": "number[]", "column": "string (Original Header Name)", "action": {"command": "string", "column": "string", "row": "number"}}],
         "loads": "Load[] | undefined",
         "mapping": "{ originalHeader: canonicalField, ... }"
       }
@@ -134,16 +135,13 @@ app.post('/openai-proxy', async (req, res) => {
 
     try {
         const jsonResult = JSON.parse(botResponse);
-        // It's a structured analysis result.
-        // The key is to return the parsed JSON result directly, which matches the UI's expected schema.
         return res.status(200).json(jsonResult);
     } catch (e) {
-        // It's a general conversational response.
         return res.status(200).json({
           ok: true,
           issues: [],
           loads: null,
-          message: botResponse // Send the message in a structured format
+          message: botResponse
         });
     }
     
