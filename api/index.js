@@ -1,141 +1,122 @@
+// api/index.js
 const express = require('express');
-const cors = require('cors');
 const fetch = require('node-fetch');
+const cors = require('cors');
 
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-// A root route to confirm the server is running.
-app.get('/', (req, res) => {
-  res.status(200).send('TruckTalk Connect AI Proxy is running.');
-});
+const PROXY_ENDPOINT = '/openai-proxy';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// The single, unified endpoint that handles both chat and analysis.
-app.post('/openai-proxy', async (req, res) => {
-  const { userMessage, headers, sampleData, requiredFields } = req.body;
-  const openaiApiKey = process.env.OPENAI_API_KEY;
-
-  if (!openaiApiKey) {
+// The core AI analysis endpoint
+app.post(PROXY_ENDPOINT, async (req, res) => {
+  if (!OPENAI_API_KEY) {
     return res.status(500).json({ error: 'OpenAI API key not set on server.' });
   }
 
-  // Define prompts for different intents
-  const analysisPrompt = `
-    You are an expert data analyst AI for "TruckTalk Connect". Your task is to analyze spreadsheet data for truck loads, validate it, and convert it into a structured JSON format.
+  const { headers, rows, knownSynonyms, requiredFields } = req.body;
 
-    **Your Goal:** Return a single JSON object that strictly matches the 'AnalysisResult' 
-    schema.
-    **Core Rules:**
-    1. **Header Mapping:** Map the user's headers to the canonical 'Load' schema fields. Use the provided 'HEADER_SYNONYMS'.
-    2. **Data Validation & Normalization:**
-      * **Dates:** All date fields MUST be converted to ISO 8601 UTC format.
-      * **Required Fields:** All fields in the provided 'requiredFields' list are mandatory.
-      * **Uniqueness:** 'loadId' must be unique.
-    3. **NEVER FABRICATE DATA:** If a value is unknown or invalid, its corresponding JSON field must be \`null\`, and you must generate an issue.
-    4. **Issue Column:** The 'column' property for each issue MUST be the original header name from the user's sheet.
-    5. **Output:** Your entire response MUST be a single, valid JSON object that strictly adheres to the 'AnalysisResult' schema.
-    6. **STRICT FIELD LIST:** Only report on the fields present in the 'requiredFields' list. Do not add or infer any other fields like 'Equipment types' unless explicitly asked.
+  // The system prompt defines the AI's role and the strict output contract.
+  const systemPrompt = `You are a specialized AI assistant for logistics data. Your task is to analyze a 2D table representing a list of loads and return a single, structured JSON object.
     
-    \`\`\`json
+    Your output MUST strictly adhere to this JSON schema:
     {
-      "HEADER_SYNONYMS": {
-        "loadId": ["Load ID", "Ref", "VRID", "Reference", "Ref #"],
-        "fromAddress": ["From", "PU", "Pickup", "Origin", "Pickup Address"],
-        "fromAppointmentDateTimeUTC": ["PU Time", "Pickup Appt", "Pickup Date/Time"],
-        "toAddress": ["To", "Drop", "Delivery", "Destination", "Delivery Address"],
-        "toAppointmentDateTimeUTC": ["DEL Time", "Delivery Appt", "Delivery Date/Time"],
-        "status": ["Status", "Load Status", "Stage"],
-        "driverName": ["Driver", "Driver Name"],
-        "unitNumber": ["Unit", "Truck", "Truck #", "Tractor", "Unit Number"],
-        "broker": ["Broker", "Customer", "Shipper"],
-        "equipmentTypes": ["equipment types", "equipment", "eqp"]
-      },
-      "AnalysisResultSchema": {
-        "ok": "boolean",
-        "issues": [{"code": "string", "severity": "'error'|'warn'", "message": "string", "rows": "number[]", "column": "string", "suggestion": "string"}],
-        "loads": "Load[] | undefined",
-        "mapping": "{ originalHeader: canonicalField, ... }",
-        "meta": {"analyzedRows": "number", "analyzedAt": "string (ISO 8601)"}
-      }
+      "ok": boolean,
+      "issues": Array<{
+        "code": string,              // e.g., MISSING_COLUMN, BAD_DATE_FORMAT, DUPLICATE_ID
+        "severity": 'error'|'warn',
+        "message": string,           // user-friendly
+        "rows"?: number[],           // affected rows (1-based)
+        "column"?: string,           // header name
+        "suggestion"?: string       // how to fix
+      }>,
+      "loads"?: Array<{
+        "loadId": string;
+        "fromAddress": string;
+        "fromAppointmentDateTimeUTC": string;
+        "toAddress": string;
+        "toAppointmentDateTimeUTC": string;
+        "status": string;
+        "driverName": string;
+        "driverPhone"?: string;
+        "unitNumber": string;
+        "broker": string;
+      }>,
+      "mapping": Record<string,string>, // header→field mapping used
+      "meta": { "analyzedRows": number; "analyzedAt": string; }
     }
-    \`\`\`
+    
+    You will perform the following tasks:
+    1.  **Interpret Headers:** Map the user's headers to the standard Load fields using the provided synonyms. If a field has no matching header, report a MISSING_COLUMN error.
+    2.  **Validate Data:**
+        * Required Columns: 'error' if any of the required fields are missing from the mapping.
+        * Duplicate 'loadId': 'error' for any duplicate 'loadId' values.
+        * Empty Cells: 'error' for any empty cells in required fields.
+        * Invalid Datetime: 'error' for non-parsable or timezone-missing dates.
+        * Inconsistent Status: 'warn' and list all unique values for user normalization.
+    3.  **Normalize Values:** Convert all date-time strings to ISO 8601 UTC format. For example, '08/29 2pm MST' becomes '2025-08-29T20:00:00Z'. State assumptions in the message if the timezone is not provided.
+    4.  **Issue Summarization:** For each issue, provide a plain-language 'message' and a 'suggestion' for fixing it.
+    5.  **Fabrication:** Never invent data. If a cell value is missing, leave the corresponding JSON field blank and flag it with an issue.
+    6.  **Return JSON:** Only return the final JSON object. Do not include any other text or explanation outside the JSON.
+    
+    The user's input is a JSON object with the following keys:
+    - 'headers': The header row of the sheet.
+    - 'rows': A small sample of the data for analysis (first 200 rows to save cost).
+    - 'knownSynonyms': The standard synonyms to use for header mapping.
+    - 'requiredFields': The list of required fields.
+    
+    Your analysis should be based solely on this provided data.`;
+
+  // The user prompt provides the actual data for the AI to analyze.
+  const userPrompt = `
+    Headers: ${JSON.stringify(headers)}
+    Rows: ${JSON.stringify(rows)}
+    Known Synonyms: ${JSON.stringify(knownSynonyms)}
+    Required Fields: ${JSON.stringify(requiredFields)}
     `;
 
-  const generalChatPrompt = `You are a helpful AI assistant for "TruckTalk Connect".
-  You are designed to answer questions and provide general information about the add-on. Be concise and friendly.`;
-
   try {
-    let openaiResponse;
-    let finalPayload;
-
-    if (headers && sampleData) {
-      finalPayload = {
-        model: 'gpt-4o',
-        messages: [{
-          role: 'system',
-          content: analysisPrompt
-        }, {
-          role: 'user',
-          content: `Analyze the headers and data below based on the provided required fields and return a single JSON object conforming to the schema.
-            Required Fields: ${JSON.stringify(requiredFields)}
-            Headers: ${JSON.stringify(headers)}
-            Sample Data: ${JSON.stringify(sampleData)}`
-        }],
-        response_format: { type: 'json_object' }
-      };
-    } else {
-      finalPayload = {
-        model: 'gpt-3.5-turbo',
-        messages: [{
-          role: 'system',
-          content: generalChatPrompt
-        }, {
-          role: 'user',
-          content: userMessage
-        }]
-      };
-    }
-    
-    openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openaiApiKey}`
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
       },
-      body: JSON.stringify(finalPayload)
+      body: JSON.stringify({
+        model: "gpt-4o", // Or another suitable model
+        response_format: { type: "json_object" },
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+      }),
     });
 
-    if (!openaiResponse.ok) {
-      const errorData = await openaiResponse.json();
-      throw new Error(`OpenAI API error: ${openaiResponse.statusText} - ${JSON.stringify(errorData)}`);
+    if (!response.ok) {
+      throw new Error(`OpenAI API request failed with status ${response.status}: ${response.statusText}`);
     }
 
-    const data = await openaiResponse.json();
-    const botResponse = data.choices[0].message.content;
+    const data = await response.json();
+    const resultJson = JSON.parse(data.choices[0].message.content);
 
-    try {
-      const jsonResult = JSON.parse(botResponse);
-      return res.status(200).json(jsonResult);
-    } catch (e) {
-      // If the AI response is not valid JSON, return a structured error.
-      return res.status(200).json({
-        ok: false,
-        issues: [{
-          code: 'INVALID_AI_RESPONSE',
-          severity: 'error',
-          message: 'The AI returned an invalid response. Please try again.',
-          suggestion: 'If the problem persists, check the proxy server logs.'
-        }],
-        mapping: {},
-        meta: { analyzedRows: 0, analyzedAt: new Date().toISOString() }
-      });
-    }
+    // Add the meta field before sending the final result back
+    const finalResult = {
+      ...resultJson,
+      meta: {
+        analyzedRows: rows.length,
+        analyzedAt: new Date().toISOString(),
+      }
+    };
+
+    res.json(finalResult);
 
   } catch (error) {
-    console.error("Proxy Error:", error);
-    res.status(500).json({ error: 'Failed to communicate with the OpenAI API.' });
+    console.error('Error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
+// For Vercel, we export the app
 module.exports = app;

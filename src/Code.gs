@@ -30,6 +30,12 @@ const HEADER_MAPPINGS = {
   broker: ['broker', 'customer', 'shipper']
 };
 
+// Define which issue codes can be fixed automatically by the AI.
+const FIXABLE_ISSUES = new Set([
+  'MISSING_REQUIRED_FIELD',
+  'INVALID_DATE_FORMAT'
+]);
+
 const PROXY_ENDPOINT = "https://truck-talk-connect.vercel.app/openai-proxy";
 
 /**
@@ -59,18 +65,18 @@ function showSidebar() {
  * @return {object|string} The response to be sent back to the UI.
  */
 function handleChatMessage(payload) {
-  const userMessage = payload.message;
-  const command = payload.command;
-  
-  if (command === 'analyze_sheet') {
-    // The command is now correctly handled by calling the function
-    // that sends data to the proxy, as outlined in the brief.
-    return sendDataForAnalysis(userMessage, 'gpt-3.5-turbo');
-  } else {
-    // This is where you would implement logic to handle user commands like
-    // "Use DEL Time for delivery appt."
-    // For now, it will just return a generic response.
-    return processGeneralChat(userMessage);
+  try {
+    switch (payload.command) {
+      case 'analyze_sheet':
+        return sendDataForAnalysis(payload.message, 'gpt-3.5-turbo');
+      case 'apply_fix':
+        return applyFix(payload.action);
+      default:
+        return 'I am an analysis bot. I can help analyze your sheet. Just type "analyze sheet" to get started!';
+    }
+  } catch (e) {
+    Logger.log(e);
+    return `Error: ${e.message}`;
   }
 }
 
@@ -80,62 +86,130 @@ function handleChatMessage(payload) {
  * @param {string} model The AI model to use for the analysis.
  * @return {object} The analysis result from the AI proxy.
  */
-function sendDataForAnalysis(userMessage, model) {
+
+function sendDataForAnalysis() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) {
-    return { ok: false, issues: [{ severity: 'error', message: 'No data found in the sheet.', suggestion: 'Please ensure you have at least one header row and one data row.' }] };
-  }
-  
-  const headers = data[0];
-  const sampleData = data.slice(1, 11); // Send first 10 rows for efficiency
-  
+  const dataRange = sheet.getDataRange();
+  const values = dataRange.getValues();
+  const headers = values.shift();
+  const rows = values.slice(0, 200); // Limit rows for performance and payload size
+
   const payload = {
     headers: headers,
-    sampleData: sampleData,
-    userMessage: userMessage,
-    requiredFields: REQUIRED_FIELDS,
-    // CORRECTED: Added the model to the payload.
-    model: model
+    rows: rows,
+    knownSynonyms: HEADER_MAPPINGS,
+    requiredFields: REQUIRED_FIELDS
   };
   
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload)
+  };
+
   try {
-    const options = {
-      'method': 'post',
-      'contentType': 'application/json',
-      'payload': JSON.stringify(payload)
-    };
-    
-    const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
+    const response = UrlFetchApp.fetch('https://truck-talk-connect.vercel.app/openai-proxy', options);
     const result = JSON.parse(response.getContentText());
     
-    // The AI-generated analysis result is returned directly
+    // Check for errors from the Vercel proxy
+    if (result.error) {
+      // Pass the error message back to the UI
+      return { ok: false, issues: [{ code: "PROXY_ERROR", severity: "error", message: `Proxy Error: ${result.error}`, suggestion: "Check the Vercel logs for more details." }] };
+    }
+
+    // Pass the full result to the UI
     return result;
-    
+
   } catch (e) {
-    return { ok: false, issues: [{ severity: 'error', message: `Server error: ${e.message}`, suggestion: 'Please check your proxy server logs for details.' }] };
+    return { ok: false, issues: [{ code: "NETWORK_ERROR", severity: "error", message: `Could not connect to analysis server: ${e.message}`, suggestion: "Check your internet connection or try again later." }] };
   }
 }
 
 /**
- * Handles a suggestion click from the UI to jump to a cell.
- * @param {object} action The action object from the AI response.
+ * Groups issues with the same code and message into a single entry,
+ * consolidating affected rows.
+ * @param {object} analysisResult The raw analysis result from the AI.
+ * @return {object} The grouped analysis result.
  */
-function handleSuggestionClick(action) {
-  if (action && action.command === 'selectCell') {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const colIndex = headers.indexOf(action.column);
-    
-    if (colIndex !== -1) {
-      selectSheetCell(colIndex, action.row);
-      return true;
-    } else {
-      SpreadsheetApp.getUi().alert(`Could not find column '${action.column}'.`);
-      return false;
-    }
+function groupIssues(analysisResult) {
+  if (!analysisResult.issues) {
+    return analysisResult;
   }
-  return false;
+  const groupedIssues = {};
+  analysisResult.issues.forEach(issue => {
+    const key = `${issue.code}-${issue.column}`;
+    if (!groupedIssues[key]) {
+      groupedIssues[key] = {
+        code: issue.code,
+        severity: issue.severity,
+        message: issue.message,
+        suggestion: issue.suggestion,
+        column: issue.column,
+        rows: []
+      };
+      if (FIXABLE_ISSUES.has(issue.code)) {
+        groupedIssues[key].action = {
+          command: `fix_${issue.code.toLowerCase()}`,
+          column: issue.column,
+          rows: []
+        };
+      }
+    }
+    groupedIssues[key].rows.push(...(issue.rows || []));
+    if (groupedIssues[key].action) {
+      groupedIssues[key].action.rows.push(...(issue.rows || []));
+    }
+  });
+
+  analysisResult.issues = Object.values(groupedIssues);
+  return analysisResult;
+}
+
+/**
+ * Applies a fix to the spreadsheet based on the action provided by the AI.
+ * @param {object} action The action object containing the command and data.
+ * @return {boolean} True if the fix was applied, false otherwise.
+ */
+function applyFix(action) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const colIndex = headers.indexOf(action.column);
+
+  if (colIndex === -1) {
+    return false; // Column not found.
+  }
+
+  try {
+    switch (action.command) {
+      case 'fix_invalid_date_format':
+        // Loop through the specified rows and attempt to fix the date format.
+        action.rows.forEach(row => {
+          const cell = sheet.getRange(row, colIndex + 1);
+          const value = cell.getValue();
+          if (typeof value === 'string') {
+            const date = new Date(value);
+            if (!isNaN(date.getTime())) {
+              cell.setValue(date);
+            }
+          }
+        });
+        return true;
+      case 'fix_missing_required_field':
+        // In the absence of a value, fill the cell with a placeholder or null.
+        action.rows.forEach(row => {
+          const cell = sheet.getRange(row, colIndex + 1);
+          if (!cell.getValue()) {
+            cell.setValue('N/A');
+          }
+        });
+        return true;
+      default:
+        return false;
+    }
+  } catch (e) {
+    console.error(`Failed to apply fix: ${e.message}`);
+    return false;
+  }
 }
 
 /**
@@ -155,11 +229,18 @@ function processGeneralChat(message) {
 
 /**
  * Selects a specific cell in the active sheet.
- * @param {number} colIndex The column index (0-based).
+ * @param {string} columnName The name of the column.
  * @param {number} rowNum The row number (1-based).
  */
-function selectSheetCell(colIndex, rowNum) {
+function selectSheetCell(columnName, rowNum) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const cell = sheet.getRange(rowNum, colIndex + 1);
-  sheet.setActiveRange(cell);
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const colIndex = headers.indexOf(columnName);
+
+  if (colIndex > -1) {
+    const range = sheet.getRange(rowNum, colIndex + 1);
+    sheet.setActiveRange(range);
+  } else {
+    throw new Error(`Column not found: ${columnName}`);
+  }
 }

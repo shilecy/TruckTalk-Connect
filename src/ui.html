@@ -110,7 +110,6 @@
         margin-bottom: 10px;
         padding: 15px;
         border-radius: 8px;
-        cursor: pointer;
         transition: background-color 0.2s;
         box-shadow: 0 1px 2px rgba(0,0,0,0.1);
       }
@@ -124,6 +123,12 @@
       }
       .issue:hover {
         background-color: #f1f3f4;
+      }
+      .issue-cell-link {
+        font-weight: bold;
+        text-decoration: underline;
+        color: #1a73e8;
+        cursor: pointer;
       }
       pre {
         background-color: #f1f3f4;
@@ -184,6 +189,12 @@
         text-decoration: none;
         cursor: pointer;
       }
+      .modal-buttons {
+          display: flex;
+          justify-content: center;
+          gap: 10px;
+          margin-top: 20px;
+      }
     </style>
   </head>
   <body>
@@ -217,40 +228,56 @@
       </div>
     </div>
 
+    <div id="fixConfirmModal" class="modal">
+        <div class="modal-content">
+            <p id="fixConfirmMessage"></p>
+            <div class="modal-buttons">
+                <button id="confirmFixBtn">Fix All</button>
+                <button id="cancelFixBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <script>
       const chatLog = document.getElementById('chatLog');
       const userInput = document.getElementById('userInput');
       const sendBtn = document.getElementById('sendBtn');
       const resultsInChatDiv = document.getElementById('resultsInChat');
       const reanalyzeBtn = document.getElementById('reanalyzeBtn');
-  
+        
       const chatTabBtn = document.getElementById('chatTabBtn');
       const resultsTabBtn = document.getElementById('resultsTabBtn');
       const chatTab = document.getElementById('chatTab');
       const resultsTab = document.getElementById('resultsTab');
       const resultsContentDiv = document.getElementById('resultsContent');
-  
+        
       const messageModal = document.getElementById('messageModal');
       const modalMessage = document.getElementById('modalMessage');
+      const fixConfirmModal = document.getElementById('fixConfirmModal');
+      const fixConfirmMessage = document.getElementById('fixConfirmMessage');
+      const confirmFixBtn = document.getElementById('confirmFixBtn');
+      const cancelFixBtn = document.getElementById('cancelFixBtn');
       const modalCloseBtn = document.getElementsByClassName('modal-close')[0];
 
-        function setButtonStyles() {
-            const buttons = [sendBtn, reanalyzeBtn];
-            buttons.forEach(btn => {
-              btn.style.padding = '10px 15px';
-              btn.style.border = 'none';
-              btn.style.backgroundColor = 'limegreen';
-              btn.style.color = 'white';
-              btn.style.borderRadius = '8px';
-              btn.style.cursor = 'pointer';
-              btn.style.fontSize = '14px';
-              btn.style.display = 'flex';
-              btn.style.alignItems = 'center';
-              btn.style.justifyContent = 'center';
-              btn.onmouseover = () => btn.style.backgroundColor = 'green';
-              btn.onmouseout = () => btn.style.backgroundColor = 'limegreen';
-            });
-          }
+      let currentFixAction = null;
+
+      function setButtonStyles() {
+        const buttons = [sendBtn, reanalyzeBtn, confirmFixBtn, cancelFixBtn];
+        buttons.forEach(btn => {
+          btn.style.padding = '10px 15px';
+          btn.style.border = 'none';
+          btn.style.backgroundColor = btn.id === 'cancelFixBtn' ? 'gray' : 'limegreen';
+          btn.style.color = 'white';
+          btn.style.borderRadius = '8px';
+          btn.style.cursor = 'pointer';
+          btn.style.fontSize = '14px';
+          btn.style.display = 'flex';
+          btn.style.alignItems = 'center';
+          btn.style.justifyContent = 'center';
+          btn.onmouseover = () => btn.style.backgroundColor = btn.id === 'cancelFixBtn' ? '#555' : 'green';
+          btn.onmouseout = () => btn.style.backgroundColor = btn.id === 'cancelFixBtn' ? 'gray' : 'limegreen';
+        });
+      }
 
       sendBtn.addEventListener('click', () => sendMessage(userInput.value.trim()));
       userInput.addEventListener('keypress', function(e) {
@@ -261,9 +288,18 @@
       chatTabBtn.addEventListener('click', () => switchTab('chat'));
       resultsTabBtn.addEventListener('click', () => switchTab('results'));
       modalCloseBtn.onclick = () => messageModal.style.display = 'none';
+      cancelFixBtn.onclick = () => fixConfirmModal.style.display = 'none';
+      confirmFixBtn.onclick = () => {
+          fixConfirmModal.style.display = 'none';
+          handleSuggestionClick(currentFixAction);
+      };
+
       window.onclick = (event) => {
         if (event.target == messageModal) {
           messageModal.style.display = 'none';
+        }
+        if (event.target == fixConfirmModal) {
+            fixConfirmModal.style.display = 'none';
         }
       }
 
@@ -295,20 +331,77 @@
         chatLog.scrollTop = chatLog.scrollHeight;
       }
       
+      function handleAnalysisResult(result) {
+        const chatLog = document.getElementById('chat-log');
+        const issuesPanel = document.getElementById('issues-panel');
+        const loadsPanel = document.getElementById('loads-panel');
+
+        // Hide both panels initially
+        issuesPanel.style.display = 'none';
+        loadsPanel.style.display = 'none';
+
+        if (result.ok) {
+          loadsPanel.style.display = 'block';
+          const loadsCodeBlock = document.getElementById('loads-json-code');
+          loadsCodeBlock.textContent = JSON.stringify(result.loads, null, 2);
+      
+          // Update meta info
+          document.getElementById('analyzed-rows').textContent = result.meta.analyzedRows;
+          document.getElementById('analyzed-at').textContent = new Date(result.meta.analyzedAt).toLocaleString();
+
+          // Clear any previous issues
+          document.getElementById('issues-list').innerHTML = '';
+
+        } else {
+          issuesPanel.style.display = 'block';
+          const issuesList = document.getElementById('issues-list');
+          issuesList.innerHTML = '';
+      
+          // Group issues by code for a cleaner display
+          const groupedIssues = result.issues.reduce((acc, issue) => {
+            const key = issue.code + (issue.column || '');
+            if (!acc[key]) {
+              acc[key] = { ...issue, rows: [] };
+            }
+            if (issue.rows) {
+              acc[key].rows = [...new Set([...acc[key].rows, ...issue.rows])];
+            }
+            return acc;
+          }, {});
+
+          for (const key in groupedIssues) {
+            const issue = groupedIssues[key];
+            const issueDiv = document.createElement('div');
+            issueDiv.className = `issue-item issue-${issue.severity}`;
+            issueDiv.innerHTML = `
+              <p><strong>${issue.severity.toUpperCase()}</strong>: ${issue.message}</p>
+              <p class="suggestion"><strong>Suggestion:</strong> ${issue.suggestion}</p>
+              ${issue.rows.length > 0 ? `<p><strong>Affected Rows:</strong> ${issue.rows.join(', ')}</p>` : ''}
+              ${issue.column ? `<p><strong>Affected Column:</strong> ${issue.column}</p>` : ''}
+            `;
+            issuesList.appendChild(issueDiv);
+          }
+        }
+    
+        // Always log the full result to the chat for transparency
+        addMessageToChat('Assistant', JSON.stringify(result, null, 2));
+      }
+
       function displayChatAnalysisResult(result) {
         const summaryMessage = `Analysis complete. Found ${result.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`;
         appendMessage('Bot', summaryMessage);
 
         let issueHtml = '';
-        result.issues.forEach(issue => {
+        result.issues.forEach((issue, index) => {
           const isClickable = issue.action !== null;
           const cursorStyle = isClickable ? 'cursor: pointer;' : 'cursor: default;';
           const clickableClass = isClickable ? 'clickable' : '';
-            
+          
           issueHtml += `
-            <div class="issue ${issue.severity} ${clickableClass}" style="${cursorStyle} margin-bottom: 5px;">
+            <div class="issue ${issue.severity} ${clickableClass}" style="${cursorStyle}">
               <p><strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
               <small>Suggestion: ${issue.suggestion}</small></p>
+              ${issue.rows.length > 0 ? `<p><small>Affected cells: ${issue.rows.length}</small></p>` : ''}
             </div>
           `;
         });
@@ -317,17 +410,20 @@
         issuesContainer.innerHTML = issueHtml;
         chatLog.appendChild(issuesContainer);
         chatLog.scrollTop = chatLog.scrollHeight;
-        
+      
         const issueDivs = issuesContainer.querySelectorAll('.issue.clickable');
         issueDivs.forEach((div, index) => {
           div.onclick = () => {
-            handleSuggestionClick(result.issues[index].action);
+            currentFixAction = result.issues[index].action;
+            fixConfirmMessage.innerText = `Do you want to apply the following fix?\n\n${result.issues[index].message}`;
+            fixConfirmModal.style.display = 'block';
           };
         });
       }
 
       function handleSuggestionClick(action) {
         resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Fixing issue...</p>`;
+        
         google.script.run
             .withSuccessHandler(isFixed => {
                 resultsInChatDiv.innerHTML = '';
@@ -340,7 +436,7 @@
                 }
             })
             .withFailureHandler(onError)
-            .handleSuggestionClick(action);
+            .handleChatMessage({ command: 'apply_fix', action: action });
       }
 
       function displayAnalysisResult(result) {
@@ -359,29 +455,17 @@
             document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
             document.getElementById('previewPushBtn').addEventListener('click', previewPush);
         } else {
-          let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on a row number to jump to the cell.</p>`;
+          let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on a link to jump to the cell.</p>`;
           result.issues.forEach(issue => {
-            const rows = issue.rows || [];
-            const column = issue.column;
+            const affectedCellsLinks = issue.rows.map(row => 
+              `<a href="#" onclick="selectCell('${issue.column}', ${row + 1}); return false;" class="issue-cell-link">${row + 1}</a>`
+            ).join(', ');
             
-            let rowLinksHtml = '';
-            if (rows.length > 0) {
-              rowLinksHtml = rows.map(rowNum => {
-                const colIndex = result.mapping[column];
-                const clickHandler = (colIndex !== undefined) ? `onclick="selectCell(${colIndex}, ${rowNum})"` : '';
-                return `<a href="#" ${clickHandler}>${rowNum}</a>`;
-              }).join(', ');
-            }
-
             issuesHtml += `<div class="issue ${issue.severity}">
               <strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
-              <small>Suggestion: ${issue.suggestion}</small>`;
-
-            if (rowLinksHtml) {
-              issuesHtml += `<p>Affected Rows: ${rowLinksHtml}</p>`;
-            }
-            
-            issuesHtml += `</div>`;
+              <small>Suggestion: ${issue.suggestion}</small>
+              <p>Affected Cells: ${affectedCellsLinks}</p>
+            </div>`;
           });
           resultsContentDiv.innerHTML = issuesHtml;
         }
@@ -391,12 +475,12 @@
         if (userMessage.trim() === '') {
           return;
         }
-        
+      
         let payload = {
           command: 'general_chat',
           message: userMessage
         };
-        
+      
         const trimmedUserMessage = userMessage.toLowerCase().trim();
         if (trimmedUserMessage.includes('analyze') || trimmedUserMessage.includes('analyse') || trimmedUserMessage.includes('reanalyze') || trimmedUserMessage.includes('summary')) {
           payload.command = 'analyze_sheet';
@@ -420,29 +504,36 @@
           .withFailureHandler(onError)
           .handleChatMessage(payload);
       }
-  
+      
       function copyJson() {
         const jsonText = document.getElementById('jsonPreview').innerText;
-        navigator.clipboard.writeText(jsonText).then(() => {
+        // document.execCommand('copy') is the reliable way to copy in an iFrame.
+        const textarea = document.createElement('textarea');
+        textarea.value = jsonText;
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand('copy');
           showMessageModal('JSON copied to clipboard!');
-        }).catch(err => {
+        } catch (err) {
           console.error('Failed to copy text: ', err);
           showMessageModal('Failed to copy JSON. Please copy manually.');
-        });
+        }
+        document.body.removeChild(textarea);
       }
-      
+  
       function previewPush() {
         const loadsJson = document.getElementById('jsonPreview').innerText;
         showMessageModal('Preview of Push Payload:\n\n' + loadsJson);
       }
 
-      function selectCell(colIndex, rowNum) {
+      function selectCell(columnName, rowNum) {
         google.script.run
             .withSuccessHandler(function() {
                 google.script.host.parent.focus();
             })
             .withFailureHandler(onError)
-            .selectSheetCell(colIndex, rowNum);
+            .selectSheetCell(columnName, rowNum);
       }
       
       function onError(error) {
@@ -455,16 +546,3 @@
     </script>
   </body>
 </html>
-
-
-
-gitignore
-
-
-# Ignore all Apps Script files pushed by clasp
-dist/
-.clasp.json
-.gas
-
-# Ignore project properties if you use them instead of Vercel
-.clasp-properties
