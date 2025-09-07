@@ -135,6 +135,25 @@ app.post('/openai-proxy', async (req, res) => {
     try {
         const jsonResult = JSON.parse(botResponse);
         // It's a structured analysis result.
+        
+        // This is the new logic for handling a structured response.
+        // It checks if there are issues and returns a structured response for the UI to handle.
+        if (jsonResult.ok === false && jsonResult.issues && jsonResult.issues.length > 0) {
+            return res.status(200).json({
+                type: 'suggestion_list',
+                message: 'Analysis complete. Found issues:',
+                issues: jsonResult.issues.map(issue => ({
+                    message: `[${issue.severity.toUpperCase()}] ${issue.message}`,
+                    suggestion: issue.suggestion,
+                    action: {
+                        type: 'jump_to_cell',
+                        column: issue.column,
+                        row: issue.rows[0] // Assuming one row per issue for this example
+                    }
+                }))
+            });
+        }
+        
         return res.status(200).json(jsonResult);
     } catch (e) {
         // It's a general conversational response.

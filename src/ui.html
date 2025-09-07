@@ -218,177 +218,215 @@
       </div>
     </div>
 
-    <script>
-      const chatLog = document.getElementById('chatLog');
-      const userInput = document.getElementById('userInput');
-      const sendBtn = document.getElementById('sendBtn');
-      const resultsInChatDiv = document.getElementById('resultsInChat');
-      const reanalyzeBtn = document.getElementById('reanalyzeBtn');
+<script>
+  const chatLog = document.getElementById('chatLog');
+  const userInput = document.getElementById('userInput');
+  const sendBtn = document.getElementById('sendBtn');
+  const resultsInChatDiv = document.getElementById('resultsInChat');
+  const reanalyzeBtn = document.getElementById('reanalyzeBtn');
+  
+  const chatTabBtn = document.getElementById('chatTabBtn');
+  const resultsTabBtn = document.getElementById('resultsTabBtn');
+  const chatTab = document.getElementById('chatTab');
+  const resultsTab = document.getElementById('resultsTab');
+  const resultsContentDiv = document.getElementById('resultsContent');
+  
+  const messageModal = document.getElementById('messageModal');
+  const modalMessage = document.getElementById('modalMessage');
+  const modalCloseBtn = document.getElementsByClassName('modal-close')[0];
+
+  // This function applies the desired styles directly to the buttons.
+  function setButtonStyles() {
+    const buttons = [sendBtn, reanalyzeBtn];
+    buttons.forEach(btn => {
+      btn.style.padding = '10px 15px';
+      btn.style.border = 'none';
+      btn.style.backgroundColor = 'limegreen';
+      btn.style.color = 'white';
+      btn.style.borderRadius = '8px';
+      btn.style.cursor = 'pointer';
+      btn.style.fontSize = '14px';
+      btn.style.display = 'flex';
+      btn.style.alignItems = 'center';
+      btn.style.justifyContent = 'center';
+      btn.onmouseover = () => btn.style.backgroundColor = 'green';
+      btn.onmouseout = () => btn.style.backgroundColor = 'limegreen';
+    });
+  }
+
+  // Event listeners for your buttons and input field.
+  sendBtn.addEventListener('click', () => sendMessage({command: 'general_chat', message: userInput.value.trim()}));
+  userInput.addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') sendMessage({command: 'general_chat', message: userInput.value.trim()});
+  });
+  reanalyzeBtn.addEventListener('click', () => sendMessage({command: 'analyze_sheet'}));
+
+  chatTabBtn.addEventListener('click', () => switchTab('chat'));
+  resultsTabBtn.addEventListener('click', () => switchTab('results'));
+  modalCloseBtn.onclick = () => messageModal.style.display = 'none';
+  window.onclick = (event) => {
+    if (event.target == messageModal) {
+      messageModal.style.display = 'none';
+    }
+  }
+
+  function showMessageModal(message) {
+    modalMessage.innerText = message;
+    messageModal.style.display = 'block';
+  }
+
+  function switchTab(tabName) {
+    if (tabName === 'chat') {
+      chatTabBtn.classList.add('active');
+      resultsTabBtn.classList.remove('active');
+      chatTab.style.display = 'block';
+      resultsTab.style.display = 'none';
+    } else {
+      chatTabBtn.classList.remove('active');
+      resultsTabBtn.classList.add('active');
+      resultsTab.style.display = 'block';
+      chatTab.style.display = 'none';
+    }
+  }
+  
+  function appendMessage(sender, text) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message-container ${sender.toLowerCase()}`;
+    const safeText = (typeof text === 'string' || text instanceof String) ? text : JSON.stringify(text);
+    messageDiv.innerHTML = `<b>${sender}:</b> ${safeText}`;
+    chatLog.appendChild(messageDiv);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+  
+  // New function to display analysis issues directly in chat
+  function displayChatAnalysisResult(result) {
+    let issueHtml = '';
+    result.issues.forEach(issue => {
+      const row = issue.rows && issue.rows[0] ? issue.rows[0] : null;
+      const column = issue.column;
+      const clickHandler = (row && column) ? `onclick="handleSuggestionClick(${JSON.stringify(issue.action)})"` : '';
       
-      const chatTabBtn = document.getElementById('chatTabBtn');
-      const resultsTabBtn = document.getElementById('resultsTabBtn');
-      const chatTab = document.getElementById('chatTab');
-      const resultsTab = document.getElementById('resultsTab');
-      const resultsContentDiv = document.getElementById('resultsContent');
-      
-      const messageModal = document.getElementById('messageModal');
-      const modalMessage = document.getElementById('modalMessage');
-      const modalCloseBtn = document.getElementsByClassName('modal-close')[0];
+      issueHtml += `
+        <div class="issue ${issue.severity}" style="cursor: pointer; margin-bottom: 5px;" ${clickHandler}>
+          <p><strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}</p>
+          <small>Suggestion: ${issue.suggestion}</small>
+        </div>
+      `;
+    });
+    
+    // Append the issues with a summary message to the chat
+    const summaryMessage = `Analysis complete. Found ${result.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`;
+    appendMessage('Bot', summaryMessage);
 
-      // This function applies the desired styles directly to the buttons.
-      function setButtonStyles() {
-        const buttons = [sendBtn, reanalyzeBtn];
-        buttons.forEach(btn => {
-          btn.style.padding = '10px 15px';
-          btn.style.border = 'none';
-          btn.style.backgroundColor = 'limegreen';
-          btn.style.color = 'white';
-          btn.style.borderRadius = '8px';
-          btn.style.cursor = 'pointer';
-          btn.style.fontSize = '14px';
-          btn.style.display = 'flex';
-          btn.style.alignItems = 'center';
-          btn.style.justifyContent = 'center';
-          btn.onmouseover = () => btn.style.backgroundColor = 'green';
-          btn.onmouseout = () => btn.style.backgroundColor = 'limegreen';
-        });
-      }
+    const issuesContainer = document.createElement('div');
+    issuesContainer.innerHTML = issueHtml;
+    chatLog.appendChild(issuesContainer);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
 
-      sendBtn.addEventListener('click', () => sendMessage({command: 'general_chat', message: userInput.value.trim()}));
-      userInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') sendMessage({command: 'general_chat', message: userInput.value.trim()});
-      });
-      reanalyzeBtn.addEventListener('click', () => sendMessage({command: 'analyze_sheet'}));
-
-      chatTabBtn.addEventListener('click', () => switchTab('chat'));
-      resultsTabBtn.addEventListener('click', () => switchTab('results'));
-      modalCloseBtn.onclick = () => messageModal.style.display = 'none';
-      window.onclick = (event) => {
-        if (event.target == messageModal) {
-          messageModal.style.display = 'none';
-        }
-      }
-
-      function showMessageModal(message) {
-        modalMessage.innerText = message;
-        messageModal.style.display = 'block';
-      }
-
-      function switchTab(tabName) {
-        if (tabName === 'chat') {
-          chatTabBtn.classList.add('active');
-          resultsTabBtn.classList.remove('active');
-          chatTab.style.display = 'block';
-          resultsTab.style.display = 'none';
-        } else {
-          chatTabBtn.classList.remove('active');
-          resultsTabBtn.classList.add('active');
-          resultsTab.style.display = 'block';
-          chatTab.style.display = 'none';
-        }
-      }
-      
-      function appendMessage(sender, text) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message-container ${sender.toLowerCase()}`;
-        // Ensure text is always a string before using it
-        const safeText = (typeof text === 'string' || text instanceof String) ? text : JSON.stringify(text);
-        messageDiv.innerHTML = `<b>${sender}:</b> ${safeText}`;
-        chatLog.appendChild(messageDiv);
-        chatLog.scrollTop = chatLog.scrollHeight;
-      }
-      
-      function displayAnalysisResult(result) {
-        resultsContentDiv.innerHTML = '';
-        if (result.ok) {
-          const jsonString = JSON.stringify(result.loads, null, 2);
-          resultsContentDiv.innerHTML = `
-            <h3>✅ Analysis Complete!</h3>
-            <p>All checks passed. Loads are ready to be pushed.</p>
-            <div class="action-buttons">
-              <button id="copyJsonBtn">Copy JSON</button>
-              <button id="previewPushBtn">Preview Push</button>
-            </div>
-            <h4>Loads JSON:</h4>
-            <pre id="jsonPreview">${jsonString}</pre>`;
-            document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
-            document.getElementById('previewPushBtn').addEventListener('click', previewPush);
-        } else {
-          let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on an issue to jump to the cell.</p>`;
-          result.issues.forEach(issue => {
-            const row = issue.rows && issue.rows[0] ? issue.rows[0] : null;
-            const column = issue.column;
-            
-            const clickHandler = (row && column) ? `onclick="selectCell(${JSON.stringify(column)}, ${row})"` : '';
-
-            issuesHtml += `<div class="issue ${issue.severity}" ${clickHandler}>
-              <strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
-              <small>Suggestion: ${issue.suggestion}</small>
-            </div>`;
-          });
-          resultsContentDiv.innerHTML = issuesHtml;
-        }
-      }
-      
-      // Main function to send commands or messages
-      function sendMessage(payload) {
-        if (!payload.message && payload.command === 'general_chat') {
-          return; // Don't send empty messages
-        }
-        
-        const userMessage = payload.message || payload.command;
-        
-        resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Thinking...</p>`;
-        appendMessage('You', userMessage);
-        userInput.value = '';
-
-        google.script.run
-          .withSuccessHandler(response => {
+  // New function to handle suggestion clicks
+  function handleSuggestionClick(action) {
+    resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Navigating to cell...</p>`;
+    google.script.run
+        .withSuccessHandler(() => {
             resultsInChatDiv.innerHTML = '';
-            if (typeof response === 'object' && response !== null && 'issues' in response) {
-              displayAnalysisResult(response);
-              appendMessage('Bot', `Analysis complete. Found ${response.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`);
-            } else {
-              const botResponse = (typeof response === 'string' || response instanceof String) ? response : JSON.stringify(response);
-              appendMessage('Bot', botResponse);
-            }
-          })
-          .withFailureHandler(onError)
-          .handleChatMessage(payload);
-      }
-      
-      function copyJson() {
-        const jsonText = document.getElementById('jsonPreview').innerText;
-        navigator.clipboard.writeText(jsonText).then(() => {
-          showMessageModal('JSON copied to clipboard!');
-        }).catch(err => {
-          console.error('Failed to copy text: ', err);
-          showMessageModal('Failed to copy JSON. Please copy manually.');
-        });
-      }
-      
-      function previewPush() {
-        const loadsJson = document.getElementById('jsonPreview').innerText;
-        showMessageModal('Preview of Push Payload:\n\n' + loadsJson);
-      }
+            appendMessage('Bot', `Mapsd successfully!`);
+        })
+        .withFailureHandler(onError)
+        .handleSuggestionClick(action);
+  }
 
-      function selectCell(colName, rowNum) {
-        google.script.run
-            .withSuccessHandler(function() {
-                google.script.host.parent.focus();
-            })
-            .withFailureHandler(onError)
-            .selectSheetCell(colName, rowNum);
-      }
-      
-      function onError(error) {
+  // The original function for the dedicated results tab is kept
+  function displayAnalysisResult(result) {
+    resultsContentDiv.innerHTML = '';
+    if (result.ok) {
+      const jsonString = JSON.stringify(result.loads, null, 2);
+      resultsContentDiv.innerHTML = `
+        <h3>✅ Analysis Complete!</h3>
+        <p>All checks passed. Loads are ready to be pushed.</p>
+        <div class="action-buttons">
+          <button id="copyJsonBtn">Copy JSON</button>
+          <button id="previewPushBtn">Preview Push</button>
+        </div>
+        <h4>Loads JSON:</h4>
+        <pre id="jsonPreview">${jsonString}</pre>`;
+        document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
+        document.getElementById('previewPushBtn').addEventListener('click', previewPush);
+    } else {
+      let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on an issue to jump to the cell.</p>`;
+      result.issues.forEach(issue => {
+        const row = issue.rows && issue.rows[0] ? issue.rows[0] : null;
+        const column = issue.column;
+        
+        const clickHandler = (row && column) ? `onclick="selectCell(${JSON.stringify(column)}, ${row})"` : '';
+
+        issuesHtml += `<div class="issue ${issue.severity}" ${clickHandler}>
+          <strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
+          <small>Suggestion: ${issue.suggestion}</small>
+        </div>`;
+      });
+      resultsContentDiv.innerHTML = issuesHtml;
+    }
+  }
+  
+  function sendMessage(payload) {
+    if (!payload.message && payload.command === 'general_chat') {
+      return;
+    }
+    
+    const userMessage = payload.message || payload.command;
+    
+    resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Thinking...</p>`;
+    appendMessage('You', userMessage);
+    userInput.value = '';
+
+    google.script.run
+      .withSuccessHandler(response => {
         resultsInChatDiv.innerHTML = '';
-        console.error('An error occurred:', error);
-        showMessageModal(`Error: ${error.message}`);
-      }
-      
-      // Call the function to set styles on page load
-      document.addEventListener('DOMContentLoaded', setButtonStyles);
-    </script>
+        if (typeof response === 'object' && response !== null && 'issues' in response) {
+          // New: Display issues in chat and in the results tab
+          displayChatAnalysisResult(response);
+          displayAnalysisResult(response);
+        } else {
+          const botResponse = (typeof response === 'string' || response instanceof String) ? response : JSON.stringify(response);
+          appendMessage('Bot', botResponse);
+        }
+      })
+      .withFailureHandler(onError)
+      .handleChatMessage(payload);
+  }
+  
+  function copyJson() {
+    const jsonText = document.getElementById('jsonPreview').innerText;
+    navigator.clipboard.writeText(jsonText).then(() => {
+      showMessageModal('JSON copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy text: ', err);
+      showMessageModal('Failed to copy JSON. Please copy manually.');
+    });
+  }
+  
+  function previewPush() {
+    const loadsJson = document.getElementById('jsonPreview').innerText;
+    showMessageModal('Preview of Push Payload:\n\n' + loadsJson);
+  }
+
+  function selectCell(colName, rowNum) {
+    google.script.run
+        .withSuccessHandler(function() {
+            google.script.host.parent.focus();
+        })
+        .withFailureHandler(onError)
+        .selectSheetCell(colName, rowNum);
+  }
+  
+  function onError(error) {
+    resultsInChatDiv.innerHTML = '';
+    console.error('An error occurred:', error);
+    showMessageModal(`Error: ${error.message}`);
+  }
+  
+  document.addEventListener('DOMContentLoaded', setButtonStyles);
+</script>
   </body>
 </html>
