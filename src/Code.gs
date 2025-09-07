@@ -31,7 +31,7 @@ const HEADER_MAPPINGS = {
   broker: ['broker', 'customer', 'shipper']
 };
 
-const PROXY_ENDPOINT = "https://your-ai-proxy-endpoint.vercel.app/openai-proxy";
+const PROXY_ENDPOINT = "https://truck-talk-connect.vercel.app//openai-proxy";
 
 /**
  * Creates the menu in Google Sheets to open the sidebar.

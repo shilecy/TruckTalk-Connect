@@ -11,6 +11,14 @@ app.get('/', (req, res) => {
   res.status(200).send('TruckTalk Connect AI Proxy is running.');
 });
 
+// New GET handler to provide a helpful message for misdirected requests.
+app.get('/openai-proxy', (req, res) => {
+  res.status(405).json({
+    error: 'Method Not Allowed',
+    message: 'This endpoint only accepts POST requests for data analysis or chat. Please send a POST request with the required body.'
+  });
+});
+
 // The single, unified endpoint that handles both chat and analysis.
 app.post('/openai-proxy', async (req, res) => {
   const { userMessage, headers, sampleData } = req.body;
