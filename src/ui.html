@@ -285,7 +285,7 @@
           chatTab.style.display = 'none';
         }
       }
-  
+      
       function appendMessage(sender, text) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message-container ${sender.toLowerCase()}`;
@@ -359,17 +359,29 @@
             document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
             document.getElementById('previewPushBtn').addEventListener('click', previewPush);
         } else {
-          let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on an issue to jump to the cell.</p>`;
+          let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on a row number to jump to the cell.</p>`;
           result.issues.forEach(issue => {
-            const row = issue.rows && issue.rows[0] ? issue.rows[0] : null;
+            const rows = issue.rows || [];
             const column = issue.column;
             
-            const clickHandler = (row && column) ? `onclick="selectCell(${JSON.stringify(column)}, ${row})"` : '';
+            let rowLinksHtml = '';
+            if (rows.length > 0) {
+              rowLinksHtml = rows.map(rowNum => {
+                const colIndex = result.mapping[column];
+                const clickHandler = (colIndex !== undefined) ? `onclick="selectCell(${colIndex}, ${rowNum})"` : '';
+                return `<a href="#" ${clickHandler}>${rowNum}</a>`;
+              }).join(', ');
+            }
 
-            issuesHtml += `<div class="issue ${issue.severity}" ${clickHandler}>
+            issuesHtml += `<div class="issue ${issue.severity}">
               <strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
-              <small>Suggestion: ${issue.suggestion}</small>
-            </div>`;
+              <small>Suggestion: ${issue.suggestion}</small>`;
+
+            if (rowLinksHtml) {
+              issuesHtml += `<p>Affected Rows: ${rowLinksHtml}</p>`;
+            }
+            
+            issuesHtml += `</div>`;
           });
           resultsContentDiv.innerHTML = issuesHtml;
         }
@@ -408,7 +420,7 @@
           .withFailureHandler(onError)
           .handleChatMessage(payload);
       }
-      
+  
       function copyJson() {
         const jsonText = document.getElementById('jsonPreview').innerText;
         navigator.clipboard.writeText(jsonText).then(() => {
@@ -424,13 +436,13 @@
         showMessageModal('Preview of Push Payload:\n\n' + loadsJson);
       }
 
-      function selectCell(colName, rowNum) {
+      function selectCell(colIndex, rowNum) {
         google.script.run
             .withSuccessHandler(function() {
                 google.script.host.parent.focus();
             })
             .withFailureHandler(onError)
-            .selectSheetCell(colName, rowNum);
+            .selectSheetCell(colIndex, rowNum);
       }
       
       function onError(error) {
