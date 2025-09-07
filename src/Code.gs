@@ -31,7 +31,7 @@ const HEADER_MAPPINGS = {
   broker: ['broker', 'customer', 'shipper']
 };
 
-const PROXY_ENDPOINT = "https://truck-talk-connect.vercel.app//openai-proxy";
+const PROXY_ENDPOINT = "https://truck-talk-connect.vercel.app/openai-proxy";
 
 /**
  * Creates the menu in Google Sheets to open the sidebar.
@@ -65,7 +65,8 @@ function handleChatMessage(payload) {
   const trimmedMessage = userMessage.toLowerCase().trim();
   
   if (command === 'analyze_sheet') {
-    return sendDataForAnalysis(userMessage);
+    // A specific model name is now included for the AI.
+    return sendDataForAnalysis(userMessage, 'gpt-3.5-turbo');
   } else {
     // This is where you would implement logic to handle user commands like
     // "Use DEL Time for delivery appt."
@@ -76,9 +77,11 @@ function handleChatMessage(payload) {
 
 /**
  * Prepares and sends sheet data to the server-side AI for analysis.
+ * @param {string} userMessage The message from the user.
+ * @param {string} model The AI model to use for the analysis.
  * @return {object} The analysis result from the AI proxy.
  */
-function sendDataForAnalysis(userMessage) {
+function sendDataForAnalysis(userMessage, model) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const data = sheet.getDataRange().getValues();
   if (data.length < 2) {
@@ -92,7 +95,9 @@ function sendDataForAnalysis(userMessage) {
     headers: headers,
     sampleData: sampleData,
     userMessage: userMessage,
-    requiredFields: REQUIRED_FIELDS
+    requiredFields: REQUIRED_FIELDS,
+    // CORRECTED: Added the model to the payload.
+    model: model
   };
   
   try {
@@ -120,7 +125,7 @@ function sendDataForAnalysis(userMessage) {
 function handleSuggestionClick(action) {
   if (action && action.command === 'selectCell') {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const headers = sheet.getange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     const colIndex = headers.indexOf(action.column);
     
     if (colIndex !== -1) {
