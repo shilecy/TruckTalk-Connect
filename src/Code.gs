@@ -60,19 +60,30 @@ function showSidebar() {
 
 /**
  * Handles all incoming messages and commands from the UI.
- * This function acts as the central router for the bot's logic.
  * @param {object} payload The data sent from the UI, containing command and message.
  * @return {object|string} The response to be sent back to the UI.
  */
 function handleChatMessage(payload) {
   try {
+    const userProperties = PropertiesService.getUserProperties();
+    const lastState = JSON.parse(userProperties.getProperty('chatState') || '{}');
+
     switch (payload.command) {
       case 'analyze_sheet':
-        return sendDataForAnalysis(payload.message, 'gpt-3.5-turbo');
+        userProperties.deleteProperty('chatState');
+        return sendDataForAnalysis(payload.message, lastState.mapping);
       case 'apply_fix':
+        userProperties.deleteProperty('chatState');
         return applyFix(payload.action);
+      case 'apply_mapping':
+        const newMapping = payload.mapping;
+        lastState.mapping = { ...lastState.mapping, ...newMapping };
+        userProperties.setProperty('chatState', JSON.stringify(lastState));
+        return { message: "Mapping applied. Re-running analysis...", success: true };
+      case 'general_chat':
+        return processGeneralChatWithAI(payload.message);
       default:
-        return 'I am an analysis bot. I can help analyze your sheet. Just type "analyze sheet" to get started!';
+        return processGeneralChat(payload.message);
     }
   } catch (e) {
     Logger.log(e);
@@ -81,13 +92,36 @@ function handleChatMessage(payload) {
 }
 
 /**
+ * Sends a general chat message to the AI proxy for a natural language response.
+ * @param {string} message The user's message.
+ * @return {object} The AI's conversational response.
+ */
+function processGeneralChatWithAI(message) {
+  const payload = {
+    chatMessage: message,
+    context: "You are a helpful assistant for the TruckTalk Connect Google Sheets add-on. You help users manage and validate trucking load data. Your responses should be conversational, professional, and directly related to the user's intent within the context of the spreadsheet."
+  };
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload)
+  };
+  try {
+    const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
+    const result = JSON.parse(response.getContentText());
+    return { ok: true, message: result.chatResponse };
+  } catch (e) {
+    return { ok: false, message: "Sorry, I'm having trouble connecting to my brain. Please try again later." };
+  }
+}
+
+/**
  * Prepares and sends sheet data to the server-side AI for analysis.
- * @param {string} userMessage The message from the user.
- * @param {string} model The AI model to use for the analysis.
+ * @param {string} userMessage The original message from the user.
+ * @param {object} existingMapping The mapping from the previous conversation state.
  * @return {object} The analysis result from the AI proxy.
  */
-
-function sendDataForAnalysis() {
+function sendDataForAnalysis(userMessage, existingMapping = {}) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const dataRange = sheet.getDataRange();
   const values = dataRange.getValues();
@@ -98,7 +132,8 @@ function sendDataForAnalysis() {
     headers: headers,
     rows: rows,
     knownSynonyms: HEADER_MAPPINGS,
-    requiredFields: REQUIRED_FIELDS
+    requiredFields: REQUIRED_FIELDS,
+    userMapping: existingMapping
   };
   
   const options = {
@@ -108,17 +143,31 @@ function sendDataForAnalysis() {
   };
 
   try {
-    const response = UrlFetchApp.fetch('https://truck-talk-connect.vercel.app/openai-proxy', options);
-    const result = JSON.parse(response.getContentText());
+    const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
     
-    // Check for errors from the Vercel proxy
+    // Check for non-successful HTTP status codes
+    if (response.getResponseCode() !== 200) {
+      return { ok: false, issues: [{ code: "PROXY_ERROR", severity: "error", message: `Proxy server returned an error: HTTP ${response.getResponseCode()} - ${response.getContentText().slice(0, 100)}`, suggestion: "Check the proxy server's logs for more details." }] };
+    }
+
+    // Try to parse the JSON response. This is the key fix.
+    let result;
+    try {
+      result = JSON.parse(response.getContentText());
+    } catch (e) {
+      return { ok: false, issues: [{ code: "INVALID_RESPONSE", severity: "error", message: `Received an invalid response from the proxy server.`, suggestion: "The response was not valid JSON. Check the proxy server's logs." }] };
+    }
+
     if (result.error) {
-      // Pass the error message back to the UI
       return { ok: false, issues: [{ code: "PROXY_ERROR", severity: "error", message: `Proxy Error: ${result.error}`, suggestion: "Check the Vercel logs for more details." }] };
     }
 
-    // Pass the full result to the UI
-    return result;
+    const groupedResult = groupIssues(result);
+
+    const userProperties = PropertiesService.getUserProperties();
+    userProperties.setProperty('lastAnalysisResult', JSON.stringify(groupedResult));
+    
+    return groupedResult;
 
   } catch (e) {
     return { ok: false, issues: [{ code: "NETWORK_ERROR", severity: "error", message: `Could not connect to analysis server: ${e.message}`, suggestion: "Check your internet connection or try again later." }] };
@@ -137,7 +186,7 @@ function groupIssues(analysisResult) {
   }
   const groupedIssues = {};
   analysisResult.issues.forEach(issue => {
-    const key = `${issue.code}-${issue.column}`;
+    const key = `${issue.code}-${issue.column || 'no_column'}`;
     if (!groupedIssues[key]) {
       groupedIssues[key] = {
         code: issue.code,
@@ -147,12 +196,14 @@ function groupIssues(analysisResult) {
         column: issue.column,
         rows: []
       };
-      if (FIXABLE_ISSUES.has(issue.code)) {
+      if (FIXABLE_ISSUES.has(issue.code) || issue.code === 'MISSING_COLUMN') {
         groupedIssues[key].action = {
           command: `fix_${issue.code.toLowerCase()}`,
           column: issue.column,
           rows: []
         };
+      } else {
+        groupedIssues[key].action = null;
       }
     }
     groupedIssues[key].rows.push(...(issue.rows || []));
@@ -176,13 +227,12 @@ function applyFix(action) {
   const colIndex = headers.indexOf(action.column);
 
   if (colIndex === -1) {
-    return false; // Column not found.
+    return false;
   }
 
   try {
     switch (action.command) {
       case 'fix_invalid_date_format':
-        // Loop through the specified rows and attempt to fix the date format.
         action.rows.forEach(row => {
           const cell = sheet.getRange(row, colIndex + 1);
           const value = cell.getValue();
@@ -195,7 +245,6 @@ function applyFix(action) {
         });
         return true;
       case 'fix_missing_required_field':
-        // In the absence of a value, fill the cell with a placeholder or null.
         action.rows.forEach(row => {
           const cell = sheet.getRange(row, colIndex + 1);
           if (!cell.getValue()) {
@@ -228,11 +277,11 @@ function processGeneralChat(message) {
 }
 
 /**
- * Selects a specific cell in the active sheet.
- * @param {string} columnName The name of the column.
- * @param {number} rowNum The row number (1-based).
+ * Jumps to the specified cell in the active sheet.
+ * @param {string} columnName The header name of the column.
+ * @param {number} rowNum The 1-based row number.
  */
-function selectSheetCell(columnName, rowNum) {
+function jumpToCell(columnName, rowNum) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const colIndex = headers.indexOf(columnName);
