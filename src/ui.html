@@ -296,18 +296,18 @@
       }
       
       function displayChatAnalysisResult(result) {
-        const summaryMessage = `Analysis complete. Found ${result.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`;
+        const issues = result.issues || [];
+        const summaryMessage = `Analysis complete. Found ${issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`;
         appendMessage('Bot', summaryMessage);
 
         let issueHtml = '';
-        result.issues.forEach(issue => {
-          // The AI will generate a more dynamic action, so we check for it here
+        issues.forEach((issue, index) => {
           const isClickable = issue.action && issue.action.command === 'selectCell';
           const cursorStyle = isClickable ? 'cursor: pointer;' : 'cursor: default;';
           const clickableClass = isClickable ? 'clickable' : '';
             
           issueHtml += `
-            <div class="issue ${issue.severity} ${clickableClass}" style="${cursorStyle} margin-bottom: 5px;">
+            <div class="issue ${issue.severity} ${clickableClass}" style="${cursorStyle}" data-index="${index}">
               <p><strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
               <small>Suggestion: ${issue.suggestion}</small></p>
             </div>
@@ -322,21 +322,21 @@
         const issueDivs = issuesContainer.querySelectorAll('.issue.clickable');
         issueDivs.forEach((div, index) => {
           div.onclick = () => {
-            handleSuggestionClick(result.issues[index].action);
+            const issue = result.issues[index];
+            if (issue && issue.action) {
+              handleSuggestionClick(issue.action);
+            }
           };
         });
       }
 
       function handleSuggestionClick(action) {
-        resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Fixing issue...</p>`;
+        resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Jumping to cell...</p>`;
         google.script.run
             .withSuccessHandler(isFixed => {
                 resultsInChatDiv.innerHTML = '';
-                if (isFixed) {
-                    appendMessage('Bot', `Issue fixed! Running re-analysis to confirm...`);
-                    sendMessage('reanalyze');
-                } else {
-                    appendMessage('Bot', `That issue cannot be fixed automatically. Please fix it manually.`);
+                if (!isFixed) {
+                    appendMessage('Bot', `That issue cannot be fixed automatically or the column was not found. Please fix it manually.`);
                 }
             })
             .withFailureHandler(onError)
@@ -348,7 +348,7 @@
         if (result.ok) {
           const jsonString = JSON.stringify(result.loads, null, 2);
           resultsContentDiv.innerHTML = `
-            <h3>✅ Analysis Complete!</h3>
+           <h3>✅ Analysis Complete!</h3>
             <p>All checks passed. Loads are ready to be pushed.</p>
             <div class="action-buttons">
               <button id="copyJsonBtn">Copy JSON</button>
@@ -360,15 +360,14 @@
             document.getElementById('previewPushBtn').addEventListener('click', previewPush);
         } else {
           let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on a row number to jump to the cell.</p>`;
-          result.issues.forEach(issue => {
+          const issues = result.issues || [];
+          issues.forEach(issue => {
             const rows = issue.rows || [];
-            const column = issue.column;
             
             let rowLinksHtml = '';
-            if (rows.length > 0) {
+            if (rows.length > 0 && issue.column) {
               rowLinksHtml = rows.map(rowNum => {
-                const colIndex = issue.mapping[column];
-                const clickHandler = (colIndex !== undefined) ? `onclick="selectCell(${colIndex}, ${rowNum})"` : '';
+                const clickHandler = `onclick="selectCell('${issue.column}', ${rowNum})"`;
                 return `<a href="#" ${clickHandler}>${rowNum}</a>`;
               }).join(', ');
             }
@@ -396,7 +395,7 @@
           command: 'general_chat',
           message: userMessage
         };
-    
+        
         const trimmedUserMessage = userMessage.toLowerCase().trim();
         if (trimmedUserMessage.includes('analyze') || trimmedUserMessage.includes('analyse') || trimmedUserMessage.includes('reanalyze') || trimmedUserMessage.includes('summary')) {
           payload.command = 'analyze_sheet';
@@ -436,21 +435,21 @@
         showMessageModal('Preview of Push Payload:\n\n' + loadsJson);
       }
 
-      function selectCell(colIndex, rowNum) {
-        google.script.run
-            .withSuccessHandler(function() {
-                google.script.host.parent.focus();
-            })
-            .withFailureHandler(onError)
-            .selectSheetCell(colIndex, rowNum);
+      function selectCell(columnName, rowNum) {
+        const action = {
+            command: 'selectCell',
+            column: columnName,
+            row: rowNum
+        };
+        handleSuggestionClick(action);
       }
-  
+      
       function onError(error) {
         resultsInChatDiv.innerHTML = '';
         console.error('An error occurred:', error);
         showMessageModal(`Error: ${error.message}`);
       }
-  
+      
       document.addEventListener('DOMContentLoaded', setButtonStyles);
     </script>
   </body>

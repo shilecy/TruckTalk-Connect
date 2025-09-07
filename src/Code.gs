@@ -31,7 +31,7 @@ const HEADER_MAPPINGS = {
   broker: ['broker', 'customer', 'shipper']
 };
 
-const PROXY_ENDPOINT = "https://truck-talk-connect.vercel.app/openai-proxy";
+const PROXY_ENDPOINT = "https://your-ai-proxy-endpoint.vercel.app/openai-proxy";
 
 /**
  * Creates the menu in Google Sheets to open the sidebar.
@@ -59,15 +59,17 @@ function showSidebar() {
  * @param {object} payload The data sent from the UI, containing command and message.
  * @return {object|string} The response to be sent back to the UI.
  */
-
 function handleChatMessage(payload) {
-  const userMessage = payload.message || "analyze"; // Provide a default message if payload.message is empty
+  const userMessage = payload.message || "analyze";
   const command = payload.command;
   const trimmedMessage = userMessage.toLowerCase().trim();
   
   if (command === 'analyze_sheet') {
-    return sendDataForAnalysis(userMessage); // Pass the message to the analysis function
+    return sendDataForAnalysis(userMessage);
   } else {
+    // This is where you would implement logic to handle user commands like
+    // "Use DEL Time for delivery appt."
+    // For now, it will just return a generic response.
     return processGeneralChat(userMessage);
   }
 }
@@ -76,7 +78,6 @@ function handleChatMessage(payload) {
  * Prepares and sends sheet data to the server-side AI for analysis.
  * @return {object} The analysis result from the AI proxy.
  */
-
 function sendDataForAnalysis(userMessage) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const data = sheet.getDataRange().getValues();
@@ -90,8 +91,8 @@ function sendDataForAnalysis(userMessage) {
   const payload = {
     headers: headers,
     sampleData: sampleData,
-    requiredFields: REQUIRED_FIELDS,
-    userMessage: userMessage // Pass the message in the payload
+    userMessage: userMessage,
+    requiredFields: REQUIRED_FIELDS
   };
   
   try {
@@ -113,6 +114,27 @@ function sendDataForAnalysis(userMessage) {
 }
 
 /**
+ * Handles a suggestion click from the UI to jump to a cell.
+ * @param {object} action The action object from the AI response.
+ */
+function handleSuggestionClick(action) {
+  if (action && action.command === 'selectCell') {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const colIndex = headers.indexOf(action.column);
+    
+    if (colIndex !== -1) {
+      selectSheetCell(colIndex, action.row);
+      return true;
+    } else {
+      SpreadsheetApp.getUi().alert(`Could not find column '${action.column}'.`);
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
  * Processes a general chat message from the user.
  * @param {string} message The user's message.
  * @return {string} The bot's chat response.
@@ -125,18 +147,6 @@ function processGeneralChat(message) {
   ];
   const greeting = welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
   return greeting;
-}
-
-/**
- * This function is now mostly handled by the server-side AI.
- * It's kept here as a placeholder for manual fixes.
- */
-function handleSuggestionClick(action) {
-  if (action && action.command === 'selectCell') {
-    selectSheetCell(action.column, action.row);
-    return true;
-  }
-  return false;
 }
 
 /**
