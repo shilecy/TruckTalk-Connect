@@ -301,7 +301,8 @@
 
         let issueHtml = '';
         result.issues.forEach(issue => {
-          const isClickable = issue.action !== null;
+          // The AI will generate a more dynamic action, so we check for it here
+          const isClickable = issue.action && issue.action.command === 'selectCell';
           const cursorStyle = isClickable ? 'cursor: pointer;' : 'cursor: default;';
           const clickableClass = isClickable ? 'clickable' : '';
             
@@ -331,7 +332,6 @@
         google.script.run
             .withSuccessHandler(isFixed => {
                 resultsInChatDiv.innerHTML = '';
-                // Only re-analyze if the backend successfully applied a fix
                 if (isFixed) {
                     appendMessage('Bot', `Issue fixed! Running re-analysis to confirm...`);
                     sendMessage('reanalyze');
@@ -367,7 +367,7 @@
             let rowLinksHtml = '';
             if (rows.length > 0) {
               rowLinksHtml = rows.map(rowNum => {
-                const colIndex = result.mapping[column];
+                const colIndex = issue.mapping[column];
                 const clickHandler = (colIndex !== undefined) ? `onclick="selectCell(${colIndex}, ${rowNum})"` : '';
                 return `<a href="#" ${clickHandler}>${rowNum}</a>`;
               }).join(', ');
@@ -396,7 +396,7 @@
           command: 'general_chat',
           message: userMessage
         };
-        
+    
         const trimmedUserMessage = userMessage.toLowerCase().trim();
         if (trimmedUserMessage.includes('analyze') || trimmedUserMessage.includes('analyse') || trimmedUserMessage.includes('reanalyze') || trimmedUserMessage.includes('summary')) {
           payload.command = 'analyze_sheet';
@@ -420,7 +420,7 @@
           .withFailureHandler(onError)
           .handleChatMessage(payload);
       }
-  
+      
       function copyJson() {
         const jsonText = document.getElementById('jsonPreview').innerText;
         navigator.clipboard.writeText(jsonText).then(() => {
@@ -444,13 +444,13 @@
             .withFailureHandler(onError)
             .selectSheetCell(colIndex, rowNum);
       }
-      
+  
       function onError(error) {
         resultsInChatDiv.innerHTML = '';
         console.error('An error occurred:', error);
         showMessageModal(`Error: ${error.message}`);
       }
-      
+  
       document.addEventListener('DOMContentLoaded', setButtonStyles);
     </script>
   </body>

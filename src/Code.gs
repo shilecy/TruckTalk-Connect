@@ -17,6 +17,7 @@ const REQUIRED_FIELDS = [
 ];
 
 // Header synonyms for robust column matching.
+// This is now the fallback for when the AI can't infer a mapping.
 const HEADER_MAPPINGS = {
   loadId: ['loadId', 'load id', 'ref', 'vrid', 'reference', 'ref #'],
   fromAddress: ['fromAddress', 'from', 'pu', 'pickup', 'origin', 'pickup address', 'pickup location'],
@@ -61,29 +62,54 @@ function showSidebar() {
 function handleChatMessage(payload) {
   const userMessage = payload.message;
   const command = payload.command;
+  const trimmedMessage = userMessage.toLowerCase().trim();
   
   if (command === 'analyze_sheet') {
-    return processSheetAnalysisCommand();
+    return sendDataForAnalysis();
+  } else {
+    // This is where you would implement logic to handle user commands like
+    // "Use DEL Time for delivery appt."
+    // For now, it will just return a generic response.
+    return processGeneralChat(userMessage);
   }
-  
-  // Handle general chat or other commands
-  return processGeneralChat(userMessage);
 }
 
 /**
- * Executes the core analysis of the active sheet.
- * @return {object} A result object containing issues or the generated load data.
+ * Prepares and sends sheet data to the server-side AI for analysis.
+ * @return {object} The analysis result from the AI proxy.
  */
-function processSheetAnalysisCommand() {
-  const analysisResult = analyzeSheet();
-  
-  if (analysisResult.issues.length > 0) {
-    // Correctly returns the full analysis object
-    return analysisResult;
+function sendDataForAnalysis() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    return { ok: false, issues: [{ severity: 'error', message: 'No data found in the sheet.', suggestion: 'Please ensure you have at least one header row and one data row.' }] };
   }
   
-  // If no issues, we can return the success message with the loads data
-  return analysisResult;
+  const headers = data[0];
+  const sampleData = data.slice(1, 11); // Send first 10 rows for efficiency
+  
+  const payload = {
+    headers: headers,
+    sampleData: sampleData,
+    requiredFields: REQUIRED_FIELDS
+  };
+  
+  try {
+    const options = {
+      'method': 'post',
+      'contentType': 'application/json',
+      'payload': JSON.stringify(payload)
+    };
+    
+    const response = UrlFetchApp.fetch(PROXY_ENDPOINT, options);
+    const result = JSON.parse(response.getContentText());
+    
+    // The AI-generated analysis result is returned directly
+    return result;
+    
+  } catch (e) {
+    return { ok: false, issues: [{ severity: 'error', message: `Server error: ${e.message}`, suggestion: 'Please check your proxy server logs for details.' }] };
+  }
 }
 
 /**
@@ -102,230 +128,15 @@ function processGeneralChat(message) {
 }
 
 /**
- * Analyzes the active sheet to validate data and find issues.
- * @return {object} An object with `ok` status and an `issues` array.
- */
-function analyzeSheet() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 2) {
-    return { ok: false, issues: [{ severity: 'error', message: 'No data found in the sheet.', suggestion: 'Please ensure you have at least one header row and one data row.', action: null }] };
-  }
-  const headers = data.shift();
-  
-  const issues = [];
-  const loads = [];
-  
-  const headerMap = mapHeaders(headers);
-  
-  const missingHeaders = REQUIRED_FIELDS.filter(field => !headerMap.map.hasOwnProperty(field));
-  if (missingHeaders.length > 0) {
-    issues.push({
-      code: 'MISSING_COLUMN',
-      severity: 'error',
-      message: 'Missing or misspelled required headers.',
-      suggestion: `Please ensure all required headers are present. Missing: ${missingHeaders.join(', ')}`,
-      action: null,
-      rows: []
-    });
-    return { ok: false, issues: issues, loads: [], mapping: headerMap.map, meta: { analyzedRows: data.length, analyzedAt: new Date().toISOString() } };
-  }
-
-  // Use a map to group similar issues
-  const issueMap = new Map();
-
-  function addIssue(newIssue) {
-    const key = `${newIssue.code}-${newIssue.column}`;
-    if (issueMap.has(key)) {
-      const existingIssue = issueMap.get(key);
-      if (newIssue.rows && newIssue.rows.length > 0) {
-        existingIssue.rows.push(...newIssue.rows);
-      }
-    } else {
-      issueMap.set(key, newIssue);
-    }
-  }
-
-  // Find inconsistent status values
-  const statusColumnIndex = headerMap.map.status;
-  const statusValues = [...new Set(data.map(row => row[statusColumnIndex] && row[statusColumnIndex].toString().trim()).filter(Boolean))];
-  if (statusValues.length > 1) {
-    addIssue({
-      code: 'INCONSISTENT_STATUS',
-      severity: 'warn',
-      message: 'Inconsistent status vocabulary found.',
-      suggestion: `Please normalize your status values. Found: ${statusValues.join(', ')}.`,
-      action: null,
-      rows: []
-    });
-  }
-
-  data.forEach((row, rowIndex) => {
-    const load = {};
-    let rowHasError = false;
-    
-    REQUIRED_FIELDS.forEach(field => {
-      const colIndex = headerMap.map[field];
-      const cellValue = row[colIndex];
-      
-      if (!cellValue || cellValue.toString().trim() === '') {
-        addIssue({
-          code: 'EMPTY_REQUIRED_CELL',
-          severity: 'error',
-          message: `Missing value for required field '${field}'.`,
-          suggestion: `Enter a value in the column '${field}'.`,
-          rows: [rowIndex + 2],
-          column: field,
-          action: {
-            command: 'selectCell',
-            column: colIndex,
-            row: rowIndex + 2
-          }
-        });
-        rowHasError = true;
-      } else {
-        load[field] = cellValue;
-      }
-    });
-
-    // Check for optional driverPhone field
-    const driverPhoneMapping = headerMap.map.driverPhone;
-    if (driverPhoneMapping !== undefined) {
-      load.driverPhone = row[driverPhoneMapping] || null;
-    }
-    
-    if (!rowHasError) {
-      loads.push(load);
-    }
-  });
-
-  // Check for duplicate loadIds
-  const loadIdMap = new Map();
-  loads.forEach((load, index) => {
-    const loadId = load.loadId;
-    if (loadIdMap.has(loadId)) {
-      addIssue({
-        code: 'DUPLICATE_ID',
-        severity: 'error',
-        message: `Duplicate loadId found: '${loadId}'.`,
-        suggestion: `Ensure each load has a unique ID.`,
-        rows: [loadIdMap.get(loadId) + 2, index + 2],
-        column: 'loadId',
-        action: null
-      });
-    } else {
-      loadIdMap.set(loadId, index);
-    }
-  });
-
-  // Check for datetime format
-  ['fromAppointmentDateTimeUTC', 'toAppointmentDateTimeUTC'].forEach(field => {
-    const colIndex = headerMap.map[field];
-    if (colIndex !== undefined) {
-      data.forEach((row, rowIndex) => {
-        const cellValue = row[colIndex];
-        if (cellValue) {
-          try {
-            const date = new Date(cellValue);
-            if (isNaN(date.getTime())) {
-              addIssue({
-                code: 'BAD_DATE_FORMAT',
-                severity: 'error',
-                message: `Invalid date/time format for field '${field}'.`,
-                suggestion: `Please use a valid ISO 8601 format.`,
-                rows: [rowIndex + 2],
-                column: field,
-                action: {
-                  command: 'selectCell',
-                  column: colIndex,
-                  row: rowIndex + 2
-                }
-              });
-            } else {
-              // This is a warning for non-ISO 8601 but valid dates
-              // Simplified check, a full check would be more complex
-              const isISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/.test(cellValue);
-              if (!isISO) {
-                 addIssue({
-                   code: 'NON_ISO_OUTPUT',
-                   severity: 'warn',
-                   message: `Date/time format for '${field}' is not ISO 8601.`,
-                   suggestion: `Please normalize to ISO 8601 UTC.`,
-                   rows: [rowIndex + 2],
-                   column: field,
-                   action: {
-                     command: 'selectCell',
-                     column: colIndex,
-                     row: rowIndex + 2
-                   }
-                 });
-              }
-            }
-          } catch (e) {
-            addIssue({
-              code: 'BAD_DATE_FORMAT',
-              severity: 'error',
-              message: `Invalid date/time format for field '${field}'.`,
-              suggestion: `Please use a valid ISO 8601 format.`,
-              rows: [rowIndex + 2],
-              column: field,
-              action: {
-                command: 'selectCell',
-                column: colIndex,
-                row: rowIndex + 2
-              }
-            });
-          }
-        }
-      });
-    }
-  });
-
-  const finalIssues = Array.from(issueMap.values());
-
-  if (finalIssues.length > 0) {
-    return { ok: false, issues: finalIssues, loads: [], mapping: headerMap.map, meta: { analyzedRows: data.length, analyzedAt: new Date().toISOString() } };
-  } else {
-    return { ok: true, issues: [], loads: loads, mapping: headerMap.map, meta: { analyzedRows: data.length, analyzedAt: new Date().toISOString() } };
-  }
-}
-
-/**
- * Maps headers in the spreadsheet to the required fields using synonyms.
- * @param {string[]} headers The header row from the spreadsheet.
- * @return {object} An object containing the mapping and a status flag.
- */
-function mapHeaders(headers) {
-  const map = {};
-  const lowerCaseHeaders = headers.map(h => h.toLowerCase());
-  
-  for (const field in HEADER_MAPPINGS) {
-    const synonyms = HEADER_MAPPINGS[field];
-    for (let i = 0; i < synonyms.length; i++) {
-      const index = lowerCaseHeaders.indexOf(synonyms[i].toLowerCase());
-      if (index !== -1) {
-        map[field] = index;
-        break; // Found a match, move to the next field
-      }
-    }
-  }
-
-  const allRequiredFound = REQUIRED_FIELDS.every(field => map.hasOwnProperty(field));
-  
-  return { map: map, allFound: allRequiredFound };
-}
-
-/**
- * Handles a user-requested fix by executing a predefined action.
- * @param {object} action The action object from the UI containing a command and parameters.
- * @return {boolean} True if a fix was applied, false otherwise.
+ * This function is now mostly handled by the server-side AI.
+ * It's kept here as a placeholder for manual fixes.
  */
 function handleSuggestionClick(action) {
   if (action && action.command === 'selectCell') {
     selectSheetCell(action.column, action.row);
-    return true; // Return true because a fix was applied
+    return true;
   }
-  return false; // Return false because no fix was applied
+  return false;
 }
 
 /**

@@ -80,11 +80,16 @@ app.post('/openai-proxy', async (req, res) => {
       })
     });
     
+    // Log the raw response status and text for debugging
+    console.log('OpenAI Intent API Response Status:', intentResponse.status);
+    const intentText = await intentResponse.text();
+    console.log('OpenAI Intent API Response Body:', intentText);
+
     if (!intentResponse.ok) {
         throw new Error('Failed to get intent from OpenAI.');
     }
 
-    const intentData = await intentResponse.json();
+    const intentData = JSON.parse(intentText);
     const intent = intentData.choices[0].message.content.trim().toLowerCase();
     
     let openaiResponse;
