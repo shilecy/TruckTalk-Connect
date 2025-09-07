@@ -331,39 +331,42 @@
         chatLog.scrollTop = chatLog.scrollHeight;
       }
       
-      function displayChatAnalysisResult(result) {
-        const summaryMessage = `Analysis complete. Found ${result.issues.length} issue(s). <a href="#" onclick="switchTab('results'); return false;">View Results</a>`;
-        appendMessage('Bot', summaryMessage);
-
-        let issueHtml = '';
-        result.issues.forEach((issue, index) => {
-          const isClickable = issue.action !== null;
-          const cursorStyle = isClickable ? 'cursor: pointer;' : 'cursor: default;';
-          const clickableClass = isClickable ? 'clickable' : '';
-          
-          issueHtml += `
-            <div class="issue ${issue.severity} ${clickableClass}" style="${cursorStyle}">
-              <p><strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
-              <small>Suggestion: ${issue.suggestion}</small></p>
-              ${issue.rows.length > 0 ? `<p><small>Affected cells: ${issue.rows.length}</small></p>` : ''}
-            </div>
-          `;
-        });
-        
-        const issuesContainer = document.createElement('div');
-        issuesContainer.innerHTML = issueHtml;
-        chatLog.appendChild(issuesContainer);
-        chatLog.scrollTop = chatLog.scrollHeight;
-      
-        const issueDivs = issuesContainer.querySelectorAll('.issue.clickable');
-        issueDivs.forEach((div, index) => {
-          div.onclick = () => {
-            currentFixAction = result.issues[index].action;
-            fixConfirmMessage.innerText = `Do you want to apply the following fix?\n\n${result.issues[index].message}`;
-            fixConfirmModal.style.display = 'block';
-          };
-        });
+    function displayChatAnalysisResult(result) {
+      if (!result.issues || result.issues.length === 0) {
+        appendMessage('Bot', "✅ No issues found. All good!");
+        return;
       }
+
+      appendMessage('Bot', `⚠️ Found ${result.issues.length} issue(s):`);
+
+      let issueHtml = '';
+      result.issues.forEach((issue, index) => {
+        issueHtml += `
+          <div class="issue ${issue.severity} clickable" data-index="${index}">
+            <p><strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}</p>
+            <p><small>Suggestion: ${issue.suggestion || "No suggestion available."}</small></p>
+            ${issue.rows?.length ? `<p><small>Affected Rows: ${issue.rows.join(', ')}</small></p>` : ""}
+          </div>
+        `;
+      });
+
+      const issuesContainer = document.createElement('div');
+      issuesContainer.innerHTML = issueHtml;
+      chatLog.appendChild(issuesContainer);
+      chatLog.scrollTop = chatLog.scrollHeight;
+
+      // Add click handlers
+      issuesContainer.querySelectorAll('.issue.clickable').forEach(div => {
+        div.onclick = () => {
+          const idx = div.dataset.index;
+          currentFixAction = result.issues[idx].action || null;
+          appendMessage('Bot', `Do you want me to fix this?\n\n${result.issues[idx].message}`);
+          fixConfirmMessage.innerText = `Fix suggestion:\n${result.issues[idx].suggestion || ''}`;
+          fixConfirmModal.style.display = 'block';
+        };
+      });
+    }
+
 
       function handleSuggestionClick(action) {
         resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Fixing issue...</p>`;
@@ -383,37 +386,44 @@
             .handleChatMessage({ command: 'apply_fix', action: action });
       }
 
-      function displayAnalysisResult(result) {
-        resultsContentDiv.innerHTML = '';
-        if (result.ok) {
-          const jsonString = JSON.stringify(result.loads, null, 2);
-          resultsContentDiv.innerHTML = `
-            <h3>✅ Analysis Complete!</h3>
-            <p>All checks passed. Loads are ready to be pushed.</p>
-            <div class="action-buttons">
-              <button id="copyJsonBtn">Copy JSON</button>
-              <button id="previewPushBtn">Preview Push</button>
-            </div>
-            <h4>Loads JSON:</h4>
-            <pre id="jsonPreview">${jsonString}</pre>`;
-            document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
-            document.getElementById('previewPushBtn').addEventListener('click', previewPush);
-        } else {
-          let issuesHtml = `<h3⚠️ Issues Found:</h3><p>Click on a link to jump to the cell.</p>`;
-          result.issues.forEach(issue => {
-            const affectedCellsLinks = issue.rows.map(row => 
-              `<a href="#" onclick="selectCell('${issue.column}', ${row + 1}); return false;" class="issue-cell-link">${row + 1}</a>`
-            ).join(', ');
-            
-            issuesHtml += `<div class="issue ${issue.severity}">
-              <strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}<br>
-              <small>Suggestion: ${issue.suggestion}</small>
-              <p>Affected Cells: ${affectedCellsLinks}</p>
-            </div>`;
-          });
-          resultsContentDiv.innerHTML = issuesHtml;
-        }
+    function displayAnalysisResult(result) {
+      resultsContentDiv.innerHTML = '';
+
+      if (result.ok) {
+        const jsonString = JSON.stringify(result.loads, null, 2);
+        resultsContentDiv.innerHTML = `
+          <h3>✅ Analysis Complete!</h3>
+          <p>All checks passed. Loads are ready to be pushed.</p>
+          <div class="action-buttons">
+            <button id="copyJsonBtn">Copy JSON</button>
+            <button id="previewPushBtn">Preview Push</button>
+          </div>
+          <h4>Loads JSON:</h4>
+          <pre id="jsonPreview">${jsonString}</pre>
+        `;
+        document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
+        document.getElementById('previewPushBtn').addEventListener('click', previewPush);
+        return;
       }
+
+      // Issues mode
+      let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on a row number to jump to the cell.</p>`;
+      result.issues.forEach(issue => {
+        const rowLinks = (issue.rows || []).map(row =>
+          `<a href="#" onclick="selectCell('${issue.column}', ${row}); return false;" class="issue-cell-link">${row}</a>`
+        ).join(', ');
+
+        issuesHtml += `
+          <div class="issue ${issue.severity}">
+            <p><strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}</p>
+            <p><small>Suggestion: ${issue.suggestion || "No suggestion available."}</small></p>
+            ${rowLinks ? `<p>Affected Rows: ${rowLinks}</p>` : ""}
+          </div>
+        `;
+      });
+      resultsContentDiv.innerHTML = issuesHtml;
+    }
+
       
       function sendMessage(userMessage) {
         if (userMessage.trim() === '') {

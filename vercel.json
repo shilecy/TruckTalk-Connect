@@ -2,7 +2,7 @@
 "rewrites": [
 {
 "source": "/openai-proxy",
-"destination": "/api/index.js"
+"destination": "/api/index"
 }
 ]
 }
