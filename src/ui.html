@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <base target="_top">
-    <style>
+<head>
+  <base target="_top">
+  <style>
       body {
         font-family: 'Roboto', 'Arial', sans-serif;
         color: #3c4043;
@@ -187,51 +187,68 @@
         text-decoration: none;
         cursor: pointer;
       }
-      .modal-buttons {
-          display: flex;
-          justify-content: center;
-          gap: 10px;
-          margin-top: 20px;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="tab-container">
-      <div id="chatTabBtn" class="tab-button active">Chat</div>
-      <div id="resultsTabBtn" class="tab-button">Results</div>
+    .modal-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="tab-container">
+    <div id="chatTabBtn" class="tab-button active">Chat</div>
+    <div id="resultsTabBtn" class="tab-button">Results</div>
+  </div>
+
+  <div id="chatTab" class="tab-content">
+    <div id="chatLog"></div>
+    <div class="input-container">
+      <input type="text" id="userInput" placeholder="Ask me here!" />
+      <button id="sendBtn">Send</button>
     </div>
+    <div id="resultsInChat"></div>
+    <div class="action-buttons">
+      <button id="reanalyzeBtn">Re-analyze</button>
+    </div>
+  </div>
 
-    <div id="chatTab" class="tab-content">
-      <div id="chatLog"></div>
-      <div class="input-container">
-        <input type="text" id="userInput" placeholder="Ask me here!" />
-        <button id="sendBtn">Send</button>
-      </div>
-      <div id="resultsInChat"></div>
-      <div class="action-buttons">
-        <button id="reanalyzeBtn">Re-analyze</button>
+  <div id="resultsTab" class="tab-content" style="display: none;">
+    <div id="resultsContent">
+      <p>Run an analysis in the chat tab to see results here.</p>
+    </div>
+  </div>
+
+    <!-- Message modal -->
+  <div id="messageModal" class="modal">
+    <div class="modal-content">
+      <span class="modal-close">&times;</span>
+      <p id="modalMessage"></p>
+    </div>
+  </div>
+
+  <!-- Fix confirm modal -->
+  <div id="fixConfirmModal" class="modal">
+    <div class="modal-content">
+      <p id="fixConfirmMessage"></p>
+      <div class="modal-buttons">
+        <button id="confirmFixBtn">Fix</button>
+        <button id="cancelFixBtn">Cancel</button>
       </div>
     </div>
+  </div>
 
-    <div id="resultsTab" class="tab-content" style="display: none;">
-      <div id="resultsContent">
-        <p>Run an analysis in the chat tab to see results here.</p>
-      </div>
-    </div>
+  <script>
+    // ======= state and element refs (will be assigned on init) =======
+    let chatLog, userInput, sendBtn, resultsInChatDiv, reanalyzeBtn;
+    let chatTabBtn, resultsTabBtn, chatTab, resultsTab, resultsContentDiv;
+    let messageModal, modalMessage, fixConfirmModal, fixConfirmMessage, confirmFixBtn, cancelFixBtn, modalCloseBtn;
 
-    <script>
-      const chatLog = document.getElementById('chatLog');
-      const userInput = document.getElementById('userInput');
-      const sendBtn = document.getElementById('sendBtn');
-      const resultsInChatDiv = document.getElementById('resultsInChat');
-      const reanalyzeBtn = document.getElementById('reanalyzeBtn');
-      const chatTabBtn = document.getElementById('chatTabBtn');
-      const resultsTabBtn = document.getElementById('resultsTabBtn');
-      const chatTab = document.getElementById('chatTab');
-      const resultsTab = document.getElementById('resultsTab');
-      const resultsContentDiv = document.getElementById('resultsContent');
+    let resultCache = null;      // store last analysis result
+    let fixIssueIndex = null;    // index of issue user wants to fix
 
-      function switchTab(tabName) {
+    // ====== helper functions ======
+    function switchTab(tabName) {
       if (tabName === 'chat') {
         chatTabBtn.classList.add('active');
         resultsTabBtn.classList.remove('active');
@@ -243,153 +260,335 @@
         resultsTab.style.display = 'block';
         chatTab.style.display = 'none';
       }
+    }
+
+    function appendMessage(sender, text) {
+      if (!chatLog) return;
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message-container ${sender.toLowerCase()}`;
+      const safeText = (typeof text === 'string' || text instanceof String) ? text : JSON.stringify(text);
+      messageDiv.innerHTML = `<b>${sender}:</b> ${safeText}`;
+      chatLog.appendChild(messageDiv);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function showMessageModal(msg) {
+      modalMessage.innerText = msg;
+      messageModal.style.display = 'block';
+    }
+
+    function onError(err) {
+      resultsInChatDiv.innerHTML = '';
+      console.error('Error', err);
+      showMessageModal(err && err.message ? err.message : JSON.stringify(err));
+    }
+
+    // ====== Analysis display in Chat (short summary) ======
+    function displayChatAnalysisResult(result) {
+      if (!result || !result.issues || result.issues.length === 0) {
+        appendMessage('Bot', "✅ No issues found. All good!");
+        return;
       }
 
-      function appendMessage(sender, text) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message-container ${sender.toLowerCase()}`;
-        const safeText = (typeof text === 'string') ? text : JSON.stringify(text);
-        messageDiv.innerHTML = `<b>${sender}:</b> ${safeText}`;
-        chatLog.appendChild(messageDiv);
-        chatLog.scrollTop = chatLog.scrollHeight;
-      }
+      // store result for later Fix / Confirm actions
+      resultCache = result;
 
-      function displayChatAnalysisResult(result) {
-        if (!result.issues || result.issues.length === 0) {
-          appendMessage('Bot', "✅ No issues found. All good!");
-          return;
-        }
+      appendMessage(
+        'Bot',
+        `⚠️ Found ${result.issues.length} issue(s). <a href="#" class="view-results-link">View Results</a>`
+      );
 
-        appendMessage('Bot', `⚠️ Found ${result.issues.length} issue(s). Click 'View Results' for details.`);
-
-        const viewResultsLink = document.createElement('a');
-        viewResultsLink.href = "#";
-        viewResultsLink.innerText = "View Results";
-        viewResultsLink.style.color = "#1a73e8";
-        viewResultsLink.style.cursor = "pointer";
-        viewResultsLink.onclick = (e) => {
+      // Rebind links
+      const links = chatLog.querySelectorAll('.view-results-link');
+      links.forEach(link => {
+        link.addEventListener('click', (e) => {
           e.preventDefault();
-          switchTab('results');
-        };
-
-        chatLog.appendChild(viewResultsLink);
-        chatLog.scrollTop = chatLog.scrollHeight;
-      }
-
-      function displayAnalysisResult(result) {
-        resultsContentDiv.innerHTML = '';
-
-        if (result.ok) {
-          const jsonString = JSON.stringify(result.loads, null, 2);
-          resultsContentDiv.innerHTML = `
-            <h3>✅ Analysis Complete!</h3>
-            <p>All checks passed. Loads are ready to be pushed.</p>
-            <div class="action-buttons">
-              <button id="copyJsonBtn">Copy JSON</button>
-              <button id="previewPushBtn">Preview Push</button>
-            </div>
-            <h4>Loads JSON:</h4>
-            <pre id="jsonPreview">${jsonString}</pre>
-          `;
-          document.getElementById('copyJsonBtn').addEventListener('click', copyJson);
-          document.getElementById('previewPushBtn').addEventListener('click', previewPush);
-          return;
-        }
-
-        // Issues
-        let issuesHtml = `<h3>⚠️ Issues Found:</h3><p>Click on a row number to jump to the cell.</p>`;
-        result.issues.forEach(issue => {
-          const rowLinks = (issue.rows || []).map(row =>
-            `<a href="#" onclick="selectCell('${issue.column || ''}', ${row}); return false;" class="issue-cell-link">${row}</a>`
-          ).join(', ');
-
-          issuesHtml += `
-            <div class="issue ${issue.severity}">
-              <p><strong>${issue.severity.toUpperCase()}:</strong> ${issue.message}</p>
-              <p><small>Suggestion: ${issue.suggestion || "Please review and update the sheet manually."}</small></p>
-              ${rowLinks ? `<p>Affected Rows: ${rowLinks}</p>` : ""}
-            </div>
-          `;
+          google.script.run.withSuccessHandler(showResults).getAnalysisResult();
         });
-        resultsContentDiv.innerHTML = issuesHtml;
-      }
-
-      function sendMessage(userMessage) {
-        if (!userMessage.trim()) return;
-        appendMessage('You', userMessage);
-        userInput.value = '';
-
-        let payload = { command: 'general_chat', message: userMessage };
-        const trimmed = userMessage.toLowerCase();
-        if (trimmed.includes('analyze') || trimmed.includes('reanalyze')) {
-          payload.command = 'analyze_sheet';
-        }
-
-        resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Analyzing...</p>`;
-
-        google.script.run
-          .withSuccessHandler(response => {
-            resultsInChatDiv.innerHTML = '';
-            if (typeof response === 'object' && response.issues) {
-              displayChatAnalysisResult(response);
-              displayAnalysisResult(response);
-            } else {
-              appendMessage('Bot', response);
-            }
-          })
-          .withFailureHandler(err => {
-            resultsInChatDiv.innerHTML = '';
-            appendMessage('Bot', `❌ Error: ${err.message}`);
-          })
-          .handleChatMessage(payload);
-      }
-
-      function copyJson() {
-        const jsonText = document.getElementById('jsonPreview').innerText;
-        const textarea = document.createElement('textarea');
-        textarea.value = jsonText;
-        document.body.appendChild(textarea);
-        textarea.select();
-        try {
-          document.execCommand('copy');
-          alert('JSON copied to clipboard!');
-        } catch {
-          alert('Failed to copy JSON.');
-        }
-        document.body.removeChild(textarea);
-      }
-
-      function previewPush() {
-        const loadsJson = document.getElementById('jsonPreview').innerText;
-        alert('Preview of Push Payload:\n\n' + loadsJson);
-      }
-
-      function selectCell(columnName, rowNum) {
-        google.script.run.selectSheetCell(columnName, rowNum);
-      }
-
-     // Setup event listeners after DOM loads
-     document.addEventListener('DOMContentLoaded', () => {
-      appendMessage('Bot', "👋 Hi! I'm your TruckTalk assistant. How may I help you?");
-
-     // Send button
-      sendBtn.addEventListener('click', () => sendMessage(userInput.value.trim()));
-
-      // Enter key
-      userInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-          sendMessage(userInput.value.trim());
-        }
       });
+    }
 
-      // Re-analyze button
-      reanalyzeBtn.addEventListener('click', () => sendMessage('analyze'));
+    // ====== Full results rendering (Results tab) ======
+    function displayAnalysisResult(result) {
+      resultCache = result;  // cache it
+      resultsContentDiv.innerHTML = '';
 
-      // Tab switching
+      if (result.ok) {
+        const jsonString = JSON.stringify(result.loads || [], null, 2);
+        const wrapper = document.createElement('div');
+        const h = document.createElement('h3'); h.innerText = '✅ Analysis Complete!';
+        wrapper.appendChild(h);
+        const p = document.createElement('p'); p.innerText = 'All checks passed. Loads are ready to be pushed.';
+        wrapper.appendChild(p);
+
+        const actions = document.createElement('div'); actions.className = 'action-buttons';
+        const copyBtn = document.createElement('button'); copyBtn.id = 'copyJsonBtn'; copyBtn.innerText = 'Copy JSON';
+        const previewBtn = document.createElement('button'); previewBtn.id = 'previewPushBtn'; previewBtn.innerText = 'Preview Push';
+        actions.appendChild(copyBtn); actions.appendChild(previewBtn);
+        wrapper.appendChild(actions);
+
+        const preLabel = document.createElement('h4'); preLabel.innerText = 'Loads JSON:';
+        wrapper.appendChild(preLabel);
+        const pre = document.createElement('pre'); pre.id = 'jsonPreview'; pre.innerText = jsonString;
+        wrapper.appendChild(pre);
+
+        resultsContentDiv.appendChild(wrapper);
+
+        copyBtn.addEventListener('click', copyJson);
+        previewBtn.addEventListener('click', previewPush);
+        return;
+      }
+
+      // Issues mode
+      const heading = document.createElement('h3'); heading.innerText = '⚠️ Issues Found:';
+      resultsContentDiv.appendChild(heading);
+      const hint = document.createElement('p'); hint.innerText = 'Click on a row number to jump to the cell.';
+      resultsContentDiv.appendChild(hint);
+
+      (result.issues || []).forEach((issue, i) => {
+        const issueDiv = document.createElement('div');
+        issueDiv.className = 'issue ' + (issue.severity || '');
+        // numbering the issues
+        const title = document.createElement('p');
+        title.innerHTML = `<strong>${i+1}. ${issue.severity.toUpperCase()}:</strong> ${issue.message}`;
+        issueDiv.appendChild(title);
+        // message
+        const msg = document.createElement('p');
+        msg.innerHTML = `<strong>${(issue.severity||'').toUpperCase()}:</strong> ${issue.message || ''}`;
+        // suggestion
+        const suggestion = document.createElement('p');
+        suggestion.innerHTML = `<small>Suggestion: ${issue.suggestion || "Please review and update the sheet manually."}</small>`;
+        issueDiv.appendChild(msg);
+        issueDiv.appendChild(suggestion);
+
+        // affected rows (clickable links)
+        if (Array.isArray(issue.rows) && issue.rows.length) {
+          const rowsP = document.createElement('p');
+          rowsP.appendChild(document.createTextNode('Affected Rows: '));
+          issue.rows.forEach((row, idx) => {
+            const a = document.createElement('a');
+            a.href = '#';
+            a.className = 'issue-cell-link';
+            a.innerText = String(row);
+            a.addEventListener('click', (e) => { e.preventDefault(); selectCell(issue.column || '', row); });
+            rowsP.appendChild(a);
+            if (idx < issue.rows.length - 1) rowsP.appendChild(document.createTextNode(', '));
+          });
+          issueDiv.appendChild(rowsP);
+        }
+
+        // Fix link (always present so user can try)
+        const fixLine = document.createElement('p');
+        const fixA = document.createElement('a');
+        fixA.href = '#';
+        fixA.innerText = 'Fix';
+        fixA.style.color = '#1a73e8';
+        fixA.style.textDecoration = 'underline';
+        fixA.addEventListener('click', (e) => { e.preventDefault(); confirmFix(i); });
+        fixLine.appendChild(fixA);
+        issueDiv.appendChild(fixLine);
+
+        // If AI suggested a mapping target, show Confirm mapping link
+        const mappingTarget = issue.suggestionTarget || issue.mappingTarget || issue.mapping || issue.suggestedMapping;
+        if (issue.code === 'MISSING_COLUMN' && issue.column && mappingTarget) {
+          const mapP = document.createElement('p');
+          const mapA = document.createElement('a');
+          mapA.href = '#';
+          mapA.innerText = 'Confirm mapping';
+          mapA.style.color = '#1a73e8';
+          mapA.style.textDecoration = 'underline';
+          mapA.addEventListener('click', (e) => { e.preventDefault(); applyMapping(issue.column, mappingTarget); });
+          mapP.appendChild(mapA);
+          issueDiv.appendChild(mapP);
+        }
+
+        resultsContentDiv.appendChild(issueDiv);
+      });
+    }
+
+    // ====== applyMapping (user confirmed header mapping) ======
+    function applyMapping(header, targetField) {
+      resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Applying mapping...</p>`;
+      google.script.run
+        .withSuccessHandler((res) => {
+          resultsInChatDiv.innerHTML = '';
+          // expect new analysis result back
+          if (res && typeof res === 'object' && 'issues' in res) {
+            displayChatAnalysisResult(res);
+            displayAnalysisResult(res);
+            switchTab('results');
+          } else {
+            appendMessage('Bot', String(res));
+          }
+        })
+        .withFailureHandler(onError)
+        .handleChatMessage({
+          command: 'apply_mapping',
+          mapping: { [header]: targetField }
+        });
+    }
+
+    // ====== Fix flow ======
+    function confirmFix(index) {
+      if (!resultCache || !resultCache.issues) return showMessageModal('No analysis cached.');
+      fixIssueIndex = index;
+      const issue = resultCache.issues[index];
+      fixConfirmMessage.innerText = `Do you want me to fix this?\n\n${issue.message}\n\nSuggestion: ${issue.suggestion || '—'}`;
+      fixConfirmModal.style.display = 'block';
+    }
+
+    function applyFix() {
+      if (fixIssueIndex === null || !resultCache) {
+        showMessageModal('No issue selected to fix.');
+        return;
+      }
+      const issue = resultCache.issues[fixIssueIndex];
+      appendMessage('Bot', `🔧 Attempting to fix: ${issue.message}`);
+      fixConfirmModal.style.display = 'none';
+      resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Applying fix...</p>`;
+
+      google.script.run
+        .withSuccessHandler((newResult) => {
+          resultsInChatDiv.innerHTML = '';
+          if (newResult && typeof newResult === 'object') {
+            appendMessage('Bot', `🎉 ${newResult.aiSummary || "Fix applied successfully!"}`);
+            displayChatAnalysisResult(newResult);
+            displayAnalysisResult(newResult);
+            switchTab('results');
+        } else {
+            appendMessage('Bot', `🔧 Fix attempted: ${newResult || "Re-analyzing..."}`);
+        }
+        })
+        .withFailureHandler(onError)
+        .handleChatMessage({ command: 'apply_fix', issue: issue });
+    }
+
+    // ====== Selecting a cell (calls server-side) ======
+    function selectCell(columnName, rowNum) {
+      // call apps script which will set the active range (or whole row fallback)
+      google.script.run
+        .withSuccessHandler(function() {
+          // focus back to sidebar if needed
+        })
+        .withFailureHandler(onError)
+        .selectSheetCell(columnName, rowNum);
+    }
+
+    // ====== sendMessage (smart intent detection) ======
+    function sendMessage(userMessage) {
+      if (!userMessage || !userMessage.trim()) return;
+      appendMessage('You', userMessage);
+      userInput.value = '';
+      resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Thinking...</p>`;
+
+      // detect "analyze"-like intents (not brittle)
+      const intentText = userMessage.toLowerCase();
+      const analyzePatterns = [
+        /analy[sz]e/, /review/, /check/, /scan/, /validate/, /audit/, /inspect/
+      ];
+      const payload = { command: 'general_chat', message: userMessage };
+      if (analyzePatterns.some(p => p.test(intentText))) {
+        payload.command = 'analyze_sheet';
+        payload.opts = {}; // keep for future use
+      }
+
+      google.script.run
+        .withSuccessHandler((response) => {
+          resultsInChatDiv.innerHTML = '';
+          if (response && typeof response === 'object' && 'issues' in response) {
+            displayChatAnalysisResult(response);
+            displayAnalysisResult(response);
+            // show results tab automatically for analysis
+            switchTab('results');
+          } else {
+            // plain conversational response
+            appendMessage('Bot', String(response));
+          }
+        })
+        .withFailureHandler(onError)
+        .handleChatMessage(payload);
+    }
+
+    // ====== utility actions ======
+    function copyJson() {
+      const pre = document.getElementById('jsonPreview');
+      if (!pre) { showMessageModal('No JSON to copy.'); return; }
+      const text = pre.innerText;
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); showMessageModal('JSON copied to clipboard!'); } 
+      catch (e) { showMessageModal('Failed to copy JSON.'); }
+      document.body.removeChild(ta);
+    }
+
+    function previewPush() {
+      const pre = document.getElementById('jsonPreview');
+      showMessageModal(pre ? pre.innerText : 'No JSON available.');
+    }
+
+    // ====== Initialize UI and event listeners safely ======
+    function setButtonStyles() {
+      // style main action buttons to match the existing look if needed
+      const buttons = [sendBtn, reanalyzeBtn, confirmFixBtn, cancelFixBtn];
+      buttons.forEach(btn => { if (!btn) return; btn.style.borderRadius = '8px'; btn.style.padding = '8px 12px'; });
+    }
+
+    function greetUser() {
+      appendMessage('Bot', "👋 Hi! I'm your TruckTalk assistant. How may I help you?");
+    }
+
+    // Init after DOM ready
+    function init() {
+      // assign refs (elements exist now)
+      chatLog = document.getElementById('chatLog');
+      userInput = document.getElementById('userInput');
+      sendBtn = document.getElementById('sendBtn');
+      resultsInChatDiv = document.getElementById('resultsInChat');
+      reanalyzeBtn = document.getElementById('reanalyzeBtn');
+      chatTabBtn = document.getElementById('chatTabBtn');
+      resultsTabBtn = document.getElementById('resultsTabBtn');
+      chatTab = document.getElementById('chatTab');
+      resultsTab = document.getElementById('resultsTab');
+      resultsContentDiv = document.getElementById('resultsContent');
+      messageModal = document.getElementById('messageModal');
+      modalMessage = document.getElementById('modalMessage');
+      fixConfirmModal = document.getElementById('fixConfirmModal');
+      fixConfirmMessage = document.getElementById('fixConfirmMessage');
+      confirmFixBtn = document.getElementById('confirmFixBtn');
+      cancelFixBtn = document.getElementById('cancelFixBtn');
+      modalCloseBtn = document.getElementsByClassName('modal-close')[0];
+
+      // greeting
+      greetUser();
+
+      // event listeners
+      sendBtn.addEventListener('click', () => sendMessage(userInput.value.trim()));
+      userInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(userInput.value.trim()); });
+      reanalyzeBtn.addEventListener('click', () => sendMessage('reanalyze'));
       chatTabBtn.addEventListener('click', () => switchTab('chat'));
       resultsTabBtn.addEventListener('click', () => switchTab('results'));
-    });
 
-    </script>
-  </body>
+      // modals
+      if (modalCloseBtn) modalCloseBtn.addEventListener('click', () => messageModal.style.display = 'none');
+      cancelFixBtn.addEventListener('click', () => fixConfirmModal.style.display = 'none');
+      confirmFixBtn.addEventListener('click', applyFix);
+
+      // click outside to close
+      window.addEventListener('click', (ev) => {
+        if (ev.target === messageModal) messageModal.style.display = 'none';
+        if (ev.target === fixConfirmModal) fixConfirmModal.style.display = 'none';
+      });
+
+      setButtonStyles();
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  </script>
+</body>
 </html>
