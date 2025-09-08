@@ -303,7 +303,7 @@
       links.forEach(link => {
         link.addEventListener('click', (e) => {
           e.preventDefault();
-          google.script.run.withSuccessHandler(showResults).getAnalysisResult();
+          switchTab('results'); 
         });
       });
     }
@@ -313,9 +313,13 @@
       resultCache = result;  // cache it
       resultsContentDiv.innerHTML = '';
 
+    // always show the Results tab
+      resultsTab.style.display = 'block';  
+       
+
       if (result.ok) {
         const jsonString = JSON.stringify(result.loads || [], null, 2);
-        const wrapper = document.createElement('div');
+        
         const h = document.createElement('h3'); h.innerText = '✅ Analysis Complete!';
         wrapper.appendChild(h);
         const p = document.createElement('p'); p.innerText = 'All checks passed. Loads are ready to be pushed.';
@@ -354,7 +358,7 @@
         issueDiv.appendChild(title);
         // message
         const msg = document.createElement('p');
-        msg.innerHTML = `<strong>${(issue.severity||'').toUpperCase()}:</strong> ${issue.message || ''}`;
+        
         // suggestion
         const suggestion = document.createElement('p');
         suggestion.innerHTML = `<small>Suggestion: ${issue.suggestion || "Please review and update the sheet manually."}</small>`;
@@ -369,8 +373,8 @@
             const a = document.createElement('a');
             a.href = '#';
             a.className = 'issue-cell-link';
-            a.innerText = String(row);
-            a.addEventListener('click', (e) => { e.preventDefault(); selectCell(issue.column || '', row); });
+            a.innerText = String(row + 1);
+            a.addEventListener('click', (e) => { e.preventDefault(); selectCell(issue.column || '', row + 1); });
             rowsP.appendChild(a);
             if (idx < issue.rows.length - 1) rowsP.appendChild(document.createTextNode(', '));
           });

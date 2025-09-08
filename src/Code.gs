@@ -79,23 +79,28 @@ function handleChatMessage(payload) {
 function applyFix(issue) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const rows = sheet.getRange(2, 1, Math.min(20, sheet.getLastRow()-1), headers.length).getValues(); // sample
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
 
+ // prepare AI prompt
   const systemPrompt = `
-You are an AI fixing Google Sheet logistics loads data.
-Given headers and rows, fix ONLY the issue described.
-Never fabricate values. Leave unknowns blank.
-Output JSON:
-{
-  fixes: [ { row: number, column: string, newValue: string } ],
-  summary: string
-}`;
+    You are TruckTalk Connect, AI assistant for fixing logistics data in Google Sheets.
+
+    Rules:
+    - Fix ONLY the described issue.
+    - Never invent values. If a value is invalid but repairable, normalize it.
+        Example: turn 08/29 2pm MST into 2025‑08‑29T20:00:00Z; state assumptions.
+    - If both date and time are missing, leave blank and flag only.
+    - Always output STRICT JSON in this format:
+ {
+  "fixes": [ { "row": number, "column": string, "newValue": string } ],
+  "summary": "string"
+ }`;
 
   const userPrompt = `
-Issue to fix: ${issue.message}
-Headers: ${JSON.stringify(headers)}
-Sample rows: ${JSON.stringify(rows.slice(0,5))}
-`;
+  Issue to fix: ${issue.message}
+  Headers: ${JSON.stringify(headers)}
+  Sample rows: ${JSON.stringify(rows.slice(0,5))}
+  `;
 
   const response = UrlFetchApp.fetch("https://api.openai.com/v1/chat/completions", {
     method: "post",
@@ -118,46 +123,21 @@ Sample rows: ${JSON.stringify(rows.slice(0,5))}
   parsed.fixes.forEach(fix => {
     const colIndex = headers.indexOf(fix.column) + 1;
     if (colIndex > 0) {
-      sheet.getRange(fix.row + 1, colIndex).setValue(fix.newValue);
+      sheet.getRange(fix.row + 2, colIndex).setValue(fix.newValue);
     }
   });
 
-  switch (issue.code) {
-    case "MISSING_COLUMN":
-      // Example: insert missing column
-      sheet.insertColumnAfter(sheet.getLastColumn());
-      sheet.getRange(1, sheet.getLastColumn()).setValue(issue.column);
-      break;
-
-    case "EMPTY_CELL":
-      // Example: flag empty cells (real fix could ask AI to fill with best guess)
-      issue.rows.forEach(row => {
-        sheet.getRange(row + 1, findColumnIndex(sheet, issue.column)).setBackground("#fff3cd"); // highlight yellow
-      });
-      break;
-
-    case "BAD_DATE_FORMAT":
-      // Example: try to parse & normalize
-      issue.rows.forEach(row => {
-        const cell = sheet.getRange(row + 1, findColumnIndex(sheet, issue.column));
-        const val = cell.getValue();
-        const parsed = tryNormalizeDate(val);
-        if (parsed) cell.setValue(parsed);
-      });
-      break;
-  }
-
   // Re-run analysis
   const newResult = analyzeActiveSheet();
-  newResult.aiSummary = parsed.summary;  // so UI can show "Great. 24 loads valid..."
+  newResult.aiSummary = parsed.summary; 
   return newResult;
 }
+
 
 function runChatAI(userMessage) {
   const systemPrompt = `
 You are TruckTalk Connect, an AI assistant inside Google Sheets.
-- If the user asks to analyze, politely suggest "Type 'analyze' to analyze this tab."
-- If they say things like "analyse this tab" or "check sheet", you may also directly suggest analysis.
+- If the user asks to 'analyze' or 'analyse' or 'scan' or 'review' or 'check' this tab, you may proceed to analyze."
 - You can explain analysis results, suggest fixes, or just chat casually.
 - Never fabricate data; if unknown, say so.
 - Keep responses short, friendly, and helpful.
@@ -267,8 +247,16 @@ Responsibilities:
 4. Flag unknown or missing values as issues.
 5. Summarize issues in plain language with suggested fixes.
 
+Validation rules (must strictly follow):
+- Required columns missing → ERROR
+- Duplicate loadId → ERROR
+- Invalid datetime → ERROR
+- Empty required cell → ERROR
+- Non-ISO datetime → WARN
+- Inconsistent status vocabulary → WARN
+
 Rules:
-- Never invent data. Unknowns must stay blank and flagged as issues.
+- Never invent data. Unknowns must stay blank and flagged as issues (ERRPR).
 - Dates must be ISO 8601 UTC.
 - Detect missing required columns, duplicate loadId, invalid datetimes, empty required cells, inconsistent statuses.
 - Normalize header synonyms.
@@ -334,7 +322,14 @@ Return JSON strictly as:
       analyzedAt: new Date().toISOString()
     };
 
+    // group duplicate issues (same code+column)
+    parsed.issues = groupIssues(parsed.issues || []).map(issue => ({
+      ...issue,
+      suggestion: issue.suggestion || "Please review and update the sheet manually."
+    }));
+
     return parsed;
+
   } catch (err) {
     return {
       ok: false,
