@@ -5,6 +5,10 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("TruckTalk Connect")
     .addItem("Open Sidebar", "showSidebar")
+    .addSeparator()
+    .addSubMenu(SpreadsheetApp.getUi().createMenu("Testing")
+      .addItem("Run All Tests", "runTests")
+      .addItem("Insert Sample Data", "insertSampleData"))
     .addToUi();
 }
 
@@ -30,12 +34,12 @@ const REQUIRED_FIELDS = [
 // Known header synonyms
 const HEADER_MAPPINGS = {
   loadId: ["Load ID", "Ref", "VRID", "Reference", "Ref #"],
-  fromAddress: ["Pickup location", "From", "PU", "Pickup", "Origin", "Pickup Address"],
+  fromAddress: ["From", "PU", "Pickup", "Origin", "Pickup Address"],
   fromAppointmentDateTimeUTC: ["PU Time", "Pickup Appt", "Pickup Date/Time"],
-  toAddress: ["Delivery location", "To", "Drop", "Delivery", "Destination", "Delivery Address"],
+  toAddress: ["To", "Drop", "Delivery", "Destination", "Delivery Address"],
   toAppointmentDateTimeUTC: ["DEL Time", "Delivery Appt", "Delivery Date/Time"],
   status: ["Status", "Load Status", "Stage"],
-  driverName: ["Driver", "Driver Name", "Carrier", "Driver/Carrier"],
+  driverName: ["Driver", "Driver Name", "Carrier"],
   driverPhone: ["Phone", "Driver Phone", "Contact"],
   unitNumber: ["Unit", "Truck", "Truck #", "Tractor", "Unit Number"],
   broker: ["Broker", "Customer", "Shipper"]
@@ -75,6 +79,7 @@ function handleChatMessage(payload) {
     };
   }
 }
+
 
 function applyFix(issue) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
@@ -124,13 +129,11 @@ function applyFix(issue) {
     "sourceColumns": string[],  // for combined date/time fixes
     "sourceValues": string[]    // original values used
   }],
-  "summary": string,
-  "transformations": [{         // explain what was done
-    "type": "datetime",
-    "from": string,
-    "to": string,
-    "logic": string
-  }]
+  suggestionTarget?: string // New field for mapping suggestions
+  }>,
+  loads?: any[],
+  mapping: Record<string,string>,
+  meta: { analyzedRows: number, analyzedAt: string }
  }`;
 
   // Enhanced prompt with datetime context
@@ -198,7 +201,7 @@ function applyFix(issue) {
       // Regular single-column fix
       const colIndex = headers.indexOf(fix.column) + 1;
       if (colIndex > 0) {
-        sheet.getRange(fix.row + 2, colIndex).setValue(fix.newValue);
+        sheet.getRange(fix.row + 1, colIndex).setValue(fix.newValue);
       }
     }
   });
@@ -219,7 +222,7 @@ function applyFix(issue) {
   }
   
   return newResult;
-}
+};
 
 
 function runChatAI(userMessage) {
@@ -241,7 +244,7 @@ You are TruckTalk Connect, an AI assistant inside Google Sheets.
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage }
       ],
-      temperature: 0.7
+      temperature: 0
     }),
     muteHttpExceptions: true
   };
@@ -481,6 +484,3 @@ function getOpenAIKey() {
   if (!key) throw new Error("Missing OpenAI API key. Set OPENAI_API_KEY in Script Properties.");
   return key;
 }
-
-
-
