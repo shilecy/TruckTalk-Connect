@@ -256,7 +256,7 @@ Validation rules (must strictly follow):
 - Inconsistent status vocabulary → WARN
 
 Rules:
-- Never invent data. Unknowns must stay blank and flagged as issues (ERRPR).
+- Never invent data. Unknowns must stay blank and flagged as issues (ERROR).
 - Dates must be ISO 8601 UTC.
 - Detect missing required columns, duplicate loadId, invalid datetimes, empty required cells, inconsistent statuses.
 - Normalize header synonyms.
@@ -292,7 +292,7 @@ Return JSON strictly as:
       Authorization: "Bearer " + getOpenAIKey()
     },
     payload: JSON.stringify({
-      model: "gpt-4.1-mini", // or gpt-3.5-turbo for cheaper
+      model: "gpt-4.1-mini", 
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: JSON.stringify(payload) }
