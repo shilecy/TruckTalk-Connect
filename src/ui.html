@@ -208,6 +208,10 @@
       <button id="sendBtn">Send</button>
     </div>
     <div id="resultsInChat"></div>
+    <div id="fixedJsonOutput" style="display: none; margin-top: 15px;">
+      <h4>Corrected Load JSON:</h4>
+      <pre id="fixedJsonPreview"></pre>
+    </div>
     <div class="action-buttons">
       <button id="reanalyzeBtn">Re-analyze</button>
     </div>
@@ -234,6 +238,10 @@
       <div class="modal-buttons">
         <button id="confirmFixBtn">Fix</button>
         <button id="cancelFixBtn">Cancel</button>
+      </div>
+      <div id="fixedJsonOutput" style="display: none; margin-top: 15px;">
+        <h4>Corrected Load JSON:</h4>
+        <pre id="fixedJsonPreview"></pre>
       </div>
     </div>
   </div>
@@ -285,6 +293,13 @@
 
     // ====== Analysis display in Chat (short summary) ======
     function displayChatAnalysisResult(result) {
+     // If a specific load was fixed, display its JSON
+      if (result.fixedLoadJson) {
+        document.getElementById('fixedJsonOutput').style.display = 'block';
+        document.getElementById('fixedJsonPreview').innerText = JSON.stringify(result.fixedLoadJson, null, 2);
+        appendMessage('Bot', result.aiSummary || "Fix applied successfully!");
+      }
+
       if (!result || !result.issues || result.issues.length === 0) {
         appendMessage('Bot', "✅ No issues found. All good!");
         return;
@@ -298,7 +313,7 @@
         `⚠️ Found ${result.issues.length} issue(s). <a href="#" class="view-results-link">View Results</a>`
       );
 
-      // Rebind links
+      // view result link
       const links = chatLog.querySelectorAll('.view-results-link');
       links.forEach(link => {
         link.addEventListener('click', (e) => {
@@ -398,7 +413,7 @@
           const mapP = document.createElement('p');
           const mapA = document.createElement('a');
           mapA.href = '#';
-          mapA.innerText = 'Confirm mapping';
+          mapA.innerText = `Confirm mapping to '${mappingTarget}'`; 
           mapA.style.color = '#1a73e8';
           mapA.style.textDecoration = 'underline';
           mapA.addEventListener('click', (e) => { e.preventDefault(); applyMapping(issue.column, mappingTarget); });

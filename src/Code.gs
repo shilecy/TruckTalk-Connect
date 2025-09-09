@@ -30,12 +30,12 @@ const REQUIRED_FIELDS = [
 // Known header synonyms
 const HEADER_MAPPINGS = {
   loadId: ["Load ID", "Ref", "VRID", "Reference", "Ref #"],
-  fromAddress: ["From", "PU", "Pickup", "Origin", "Pickup Address"],
+  fromAddress: ["Pickup location", "From", "PU", "Pickup", "Origin", "Pickup Address"],
   fromAppointmentDateTimeUTC: ["PU Time", "Pickup Appt", "Pickup Date/Time"],
-  toAddress: ["To", "Drop", "Delivery", "Destination", "Delivery Address"],
+  toAddress: ["Delivery location", "To", "Drop", "Delivery", "Destination", "Delivery Address"],
   toAppointmentDateTimeUTC: ["DEL Time", "Delivery Appt", "Delivery Date/Time"],
   status: ["Status", "Load Status", "Stage"],
-  driverName: ["Driver", "Driver Name", "Carrier"],
+  driverName: ["Driver", "Driver Name", "Carrier", "Driver/Carrier"],
   driverPhone: ["Phone", "Driver Phone", "Contact"],
   unitNumber: ["Unit", "Truck", "Truck #", "Tractor", "Unit Number"],
   broker: ["Broker", "Customer", "Shipper"]
@@ -269,7 +269,8 @@ Return JSON strictly as:
     message: string,
     rows?: number[],
     column?: string,
-    suggestion?: string
+    suggestion?: string,
+    suggestionTarget?: string // New field for mapping suggestions
   }>,
   loads?: any[],
   mapping: Record<string,string>,
