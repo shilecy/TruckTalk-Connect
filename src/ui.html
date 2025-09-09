@@ -11,7 +11,7 @@
         padding: 0;
       }
       .json-container {
-        background-color: #f8f9fa;
+        background-color: #e8f0fe;
         border: 1px solid #dadce0;
         border-radius: 8px;
         margin: 15px 0;
@@ -20,7 +20,7 @@
       }
       .json-header {
         display: flex;
-        justify-content: space-between;
+        justify-content: flex-start;
         align-items: center;
         padding: 10px 15px;
         background-color: #e8f0fe;
@@ -126,7 +126,7 @@
       }
       #sendBtn {
           background-color: #e8f0fe; /* Example: blue */
-          color: #5f6368;               /* Example: white text */
+          color: #1a73e8;               /* Example: white text */
           border-radius: 8px;
           padding: 10px 15px;
           cursor: pointer;
@@ -148,7 +148,7 @@
         padding: 10px 15px;
         border: 1px solid #e8f0fe;
         background-color: #e8f0fe;
-        color: #5f6368;
+        color: #1a73e8;
         border-radius: 8px;
         cursor: pointer;
         transition: all 0.2s;
@@ -445,21 +445,30 @@
       const jsonContainer = document.createElement('div');
       jsonContainer.className = 'json-container';
       
-      // JSON Header with actions
-      const jsonHeader = document.createElement('div');
-      jsonHeader.className = 'json-header';
-      jsonHeader.innerHTML = `
-        <div class="json-title">Validated Loads Data</div>
-        <div class="json-actions">
-          <button id="copyJsonBtn" class="action-button">
-            <span style="margin-right: 4px;">📋</span> Copy
-          </button>
-          <button id="previewPushBtn" class="action-button">
-            <span style="margin-right: 4px;">🚀</span> Preview Push
-          </button>
-        </div>
+      // JSON Title
+      const jsonTitle = document.createElement('div');
+      jsonTitle.className = 'json-title';
+      jsonTitle.textContent = 'Validated Loads Data';
+      jsonTitle.style.textAlign = 'center';
+      jsonTitle.style.padding = '10px 15px';
+      jsonTitle.style.fontWeight = 'bold';
+      jsonContainer.appendChild(jsonTitle);
+      
+      // JSON Actions
+      const jsonActions = document.createElement('div');
+      jsonActions.className = 'json-actions';
+      jsonActions.style.justifyContent = 'center';
+      jsonActions.style.padding = '0 15px 10px 15px';
+      jsonActions.style.fontWeight = 'bold';
+      jsonActions.innerHTML = `
+        <button id="copyJsonBtn" class="action-button">
+          <span>Copy</span>
+        </button>
+        <button id="previewPushBtn" class="action-button">
+          <span>Preview</span>
+        </button>
       `;
-      jsonContainer.appendChild(jsonHeader);
+      jsonContainer.appendChild(jsonActions);
       
       // JSON Content
       const jsonContent = document.createElement('pre');
@@ -476,10 +485,10 @@
           padding: 6px 12px;
           border: 1px solid #dadce0;
           border-radius: 4px;
-          background-color: white;
-          color: #1a73e8;
+          background-color: #f8f9fa;
+          color: #5f6368;
           cursor: pointer;
-          font-size: 13px;
+          font-size: 14px;
           transition: all 0.2s;
         `;
       });
@@ -594,48 +603,48 @@
     }
 
     function applyFix() {
+      // Show loading spinner
+      resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Applying the fix...</p>`;
+      
       if (fixIssueIndex === null || !resultCache) {
         showMessageModal('No issue selected to fix.');
         return;
       }
       const issue = resultCache.issues[fixIssueIndex];
-      appendMessage('Bot', `🤔 Analyzing issue: ${issue.message}`);
       fixConfirmModal.style.display = 'none';
-      resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">AI is analyzing and fixing the issue...</p>`;
 
-    google.script.run
-        .withSuccessHandler((newResult) => {
-          resultsInChatDiv.innerHTML = '';
-          if (newResult && typeof newResult === 'object') {
-            // Just show a simple confirmation message in the chat
-            appendMessage('Bot', `✅ Fixed Issue ${fixIssueIndex + 1}.`);              
+      // Show a temporary loading message for immediate feedback
+      appendMessage('Bot', "Just a moment, I'm working on the fix...");
 
-            // Then show AI's explanation
-            if (newResult.aiSummary) {
-              appendMessage('Bot', `🔍 ${newResult.aiSummary}`);
+      // Call the server-side function, which will use AI to generate a chat response
+      // based on the issue and its details.
+      google.script.run
+        .withSuccessHandler((response) => {
+            resultsInChatDiv.innerHTML = ''; // Hide loading spinner
+          // The response from the server should contain the chat message and the analysis result
+          if (response && response.chatMessage) {
+            appendMessage('Bot', response.chatMessage);
+            if (response.result && typeof response.result === 'object') {
+              displayChatAnalysisResult(response.result);
+              displayAnalysisResult(response.result);
+              switchTab('results');
             }
-
-            // Update the full analysis results in the Results tab
-            displayChatAnalysisResult(newResult);
-            displayAnalysisResult(newResult);
-            
-            // Show remaining issues count
-            const remainingIssues = newResult.issues ? newResult.issues.length : 0;
-            if (remainingIssues > 0) {
-              appendMessage('Bot', `⚠️ ${remainingIssues} remaining issue${remainingIssues > 1 ? 's' : ''} found. Check the Results tab for details.`);
-            } else {
-              appendMessage('Bot', '✨ All issues have been resolved!');
-            }
-
-            switchTab('results');
-        } else {
-            appendMessage('Bot', `❌ Unable to fix: ${newResult || "Unknown error"}`);
-        }
+          } else {
+            // Fallback for unexpected server response
+            appendMessage('Bot', "❌ Unable to fix: Unexpected response from server.");
+          }
         })
-        .withFailureHandler(onError)
-        .handleChatMessage({ 
-          command: 'apply_fix', 
-          issue: issue,
+         .withFailureHandler((err) => {
+          resultsInChatDiv.innerHTML = ''; // Hide loading spinner
+          onError(err);
+        })
+         .handleChatMessage({ 
+           command: 'apply_fix', 
+           issue: issue,
+        // Add a property to signal that we need an AI-generated chat response
+          chatRequest: {
+            prompt: `Explain the fix for issue: ${issue.message}. The suggested fix is: ${issue.suggestion || '—'}. Use a friendly, conversational tone.`
+           },
           context: {
             issueIndex: fixIssueIndex,
             totalIssues: resultCache.issues.length
@@ -666,22 +675,34 @@
       const analyzePatterns = [
         /analy[sz]e/, /review/, /check/, /scan/, /validate/, /audit/, /inspect/
       ];
-      const payload = { command: 'general_chat', message: userMessage };
+      const payload = {
+        command: 'general_chat',
+        message: userMessage,
+        // Always request an AI response for general chat
+        chatRequest: {
+          prompt: userMessage
+        }
+      };
+
       if (analyzePatterns.some(p => p.test(intentText))) {
         payload.command = 'analyze_sheet';
         payload.opts = {}; // keep for future use
+        // The chat request for analysis will be handled by the server
+        payload.chatRequest.prompt = "Summarize the results of the data analysis and any issues found. Keep it concise and friendly.";
       }
 
       google.script.run
         .withSuccessHandler((response) => {
           resultsInChatDiv.innerHTML = '';
-          if (response && typeof response === 'object' && 'issues' in response) {
-            displayChatAnalysisResult(response);
-            displayAnalysisResult(response);
-            // show results tab automatically for analysis
-            switchTab('results');
+          if (response && response.chatMessage) {
+            appendMessage('Bot', response.chatMessage);
+            if (response.result && typeof response.result === 'object' && 'issues' in response.result) {
+              displayChatAnalysisResult(response.result);
+              displayAnalysisResult(response.result);
+              switchTab('results');
+            }
           } else {
-            // plain conversational response
+            // Fallback for unexpected server response
             appendMessage('Bot', String(response));
           }
         })

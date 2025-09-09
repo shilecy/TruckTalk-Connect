@@ -48,38 +48,116 @@ const HEADER_MAPPINGS = {
 /**
  * Central entry point for UI messages
  */
-function handleChatMessage(payload) { 
+function handleChatMessage(payload) {
+  let result;
+  let chatMessage = "";
+
   try {
+    // Dispatch commands based on payload
     if (payload.command === "analyze_sheet") {
-      return analyzeActiveSheet({ returnLoads: false });
+      result = analyzeActiveSheet({ returnLoads: true });
+      chatMessage = generateAIResponse(payload.chatRequest.prompt, result);
+      return { chatMessage: chatMessage, result: result };
     }
 
     if (payload.command === "apply_fix") {
-      return applyFix(payload.issue);
+      const issue = payload.issue;
+      result = applyFix(issue);
+      chatMessage = generateAIResponse(payload.chatRequest.prompt, result, {
+        issueMessage: issue.message,
+        suggestion: issue.suggestion
+      });
+      return { chatMessage: chatMessage, result: result };
     }
 
     if (payload.command === "apply_mapping") {
-      // user confirmed mapping -> re-run analysis with overrides
-      return analyzeActiveSheet({ headerOverrides: payload.mapping, returnLoads: true });
+      result = analyzeActiveSheet({ headerOverrides: payload.mapping, returnLoads: true });
+      chatMessage = generateAIResponse(payload.chatRequest.prompt, result);
+      return { chatMessage: chatMessage, result: result };
     }
 
-    // default → let AI chat handle it
-    return runChatAI(payload.message);
+    if (payload.command === "general_chat") {
+      chatMessage = generateAIResponse(payload.chatRequest.prompt);
+      return { chatMessage: chatMessage };
+    }
+    
+    // Fallback for unknown commands
+    return {
+      chatMessage: "I'm not sure how to handle that request. Please try asking me something else.",
+      result: null
+    };
 
   } catch (err) {
+    // Global error handler
     return {
-      ok: false,
-      issues: [{
-        code: "ERROR",
-        severity: "error",
-        message: err.message
-      }],
-      mapping: {},
-      meta: { analyzedRows: 0, analyzedAt: new Date().toISOString() }
+      chatMessage: `An unexpected error occurred: ${err.message}`,
+      result: {
+        ok: false,
+        issues: [{
+          code: "SERVER_ERROR",
+          severity: "error",
+          message: err.message
+        }],
+        mapping: {},
+        meta: { analyzedRows: 0, analyzedAt: new Date().toISOString() }
+      }
     };
   }
 }
 
+/**
+ * Generates an AI-driven chat response.
+ *
+ * @param {string} userPrompt The prompt to send to the AI.
+ * @param {object} [result] The analysis result from a sheet operation.
+ * @param {object} [context] Additional context for the AI.
+ * @returns {string} The AI-generated chat message.
+ */
+function generateAIResponse(userPrompt, result, context = {}) {
+  const systemPrompt = `
+    You are TruckTalk Connect, a helpful and friendly AI assistant for Google Sheets.
+    Your main goal is to make a user's life easier by providing clear, concise, and friendly updates.
+    - Keep responses short and conversational.
+    - If provided, use the analysis result JSON to inform your answer.
+    - If there are no issues, give a positive and encouraging response.
+    - When there are issues, summarize them briefly and refer the user to the "Results" tab for details.
+    - When a fix is applied, provide a quick confirmation of what was fixed.
+    - Never mention the API or the AI model you are using.
+    - Always use a friendly, conversational tone.
+    `;
+
+  let fullPrompt = userPrompt;
+  if (result) {
+    fullPrompt += `\n\nSheet analysis result:\n${JSON.stringify(result, null, 2)}`;
+  }
+  if (context.issueMessage) {
+    fullPrompt += `\n\nIssue fixed: "${context.issueMessage}". Suggested fix: "${context.suggestion}"`;
+  }
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: { Authorization: "Bearer " + getOpenAIKey() },
+    payload: JSON.stringify({
+      model: "gpt-4.1-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: fullPrompt }
+      ],
+      temperature: 0.7
+    }),
+    muteHttpExceptions: true
+  };
+
+  try {
+    const response = UrlFetchApp.fetch("https://api.openai.com/v1/chat/completions", options);
+    const data = JSON.parse(response.getContentText());
+    return data.choices[0].message.content;
+  } catch (err) {
+    console.error("Error contacting AI:", err.message);
+    return "⚠️ I'm having trouble connecting right now. Please try again in a moment.";
+  }
+}
 
 function applyFix(issue) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
@@ -89,17 +167,14 @@ function applyFix(issue) {
   // Add helper function to combine date and time into ISO 8601
   function combineDateTime(dateValue, timeValue) {
     if (!dateValue || !timeValue) return null;
-    
     let date = new Date(dateValue);
     let time = new Date(timeValue);
-    
     // If time has the 1899-12-30 date, extract just the time part
     if (time.getFullYear() === 1899 && time.getMonth() === 11 && time.getDate() === 30) {
       date.setHours(time.getHours());
       date.setMinutes(time.getMinutes());
       date.setSeconds(time.getSeconds());
     }
-    
     // Convert to ISO string and ensure UTC
     return date.toISOString();
   }
@@ -225,39 +300,6 @@ function applyFix(issue) {
   return newResult;
 }
 
-
-function runChatAI(userMessage) {
-  const systemPrompt = `
-You are TruckTalk Connect, an AI assistant inside Google Sheets.
-- If the user asks to 'analyze' or 'analyse' or 'scan' or 'review' or 'check' this tab, you may proceed to analyze."
-- You can explain analysis results, suggest fixes, or just chat casually.
-- Never fabricate data; if unknown, say so.
-- Keep responses short, friendly, and helpful.
-`;
-
-  const options = {
-    method: "post",
-    contentType: "application/json",
-    headers: { Authorization: "Bearer " + getOpenAIKey() },
-    payload: JSON.stringify({
-      model: "gpt-4.1-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage }
-      ],
-      temperature: 0
-    }),
-    muteHttpExceptions: true
-  };
-
-  try {
-    const response = UrlFetchApp.fetch("https://api.openai.com/v1/chat/completions", options);
-    const data = JSON.parse(response.getContentText());
-    return data.choices[0].message.content;
-  } catch (err) {
-    return "⚠️ Error contacting AI: " + err.message;
-  }
-}
 
 function detectIntent(userMessage) {
   const msg = userMessage.toLowerCase().trim();
