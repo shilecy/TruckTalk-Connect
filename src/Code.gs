@@ -111,6 +111,7 @@ function applyFix(issue) {
     Rules:
     - Fix ONLY the described issue.
     - Never invent values. If a value is invalid but repairable, normalize it.
+    - Only use provided HEADER_MAPPINGS for header→field mapping.
     - For datetime fixes:
       * Combine separate date and time columns into ISO 8601 UTC
       * If time has '1899-12-30', extract only the time part
@@ -222,7 +223,7 @@ function applyFix(issue) {
   }
   
   return newResult;
-};
+}
 
 
 function runChatAI(userMessage) {
@@ -302,7 +303,7 @@ function analyzeActiveSheet(opts) {
     suggestion: issue.suggestion || "Please review and update the sheet manually."
   }));
 
-    // ✅ NEW: Only include the 'loads' data if the returnLoads flag is true
+    // Only include the 'loads' data if the returnLoads flag is true
   if (opts?.returnLoads) {
     // Re-call OpenAI to get the loads if they weren't returned before
     if (!result.loads) {
@@ -357,6 +358,12 @@ Validation rules (must strictly follow):
 - Empty required cell → ERROR
 - Non-ISO datetime → WARN
 - Inconsistent status vocabulary → WARN
+
+Row Indexing Rule (must strictly follow):
+- Sheet row 1 = headers
+- When analyzing rows, the first data row is sheet row 2.
+- ALWAYS report issue row numbers as the actual Google Sheet row numbers, not zero-based indexes.
+- Example: if the 1st row of data has an issue, output row = 2.
 
 Rules:
 - Never invent data. Unknowns must stay blank and flagged as issues (ERROR).
@@ -426,7 +433,7 @@ Return JSON strictly as:
       analyzedAt: new Date().toISOString()
     };
 
-    // ✅ NEW: If returnLoads is false, remove the loads property
+    // If returnLoads is false, remove the loads property
     if (!returnLoads) {
       delete parsed.loads;
     }
@@ -483,4 +490,165 @@ function getOpenAIKey() {
   const key = props.getProperty("OPENAI_API_KEY");
   if (!key) throw new Error("Missing OpenAI API key. Set OPENAI_API_KEY in Script Properties.");
   return key;
+}
+
+
+
+
+// ================== TESTS (moved from tests.gs) ==================
+
+
+function runTests() {
+  const tests = [
+    testDateTimeNormalization,
+    testAddressValidation,
+    testLoadIdValidation,
+    testRequiredFieldValidation,
+    testEmptyCellDetection
+  ];
+  let passed = 0;
+  let failed = 0;
+  tests.forEach(test => {
+    try {
+      test();
+      passed++;
+      Logger.log(`✅ ${test.name} passed`);
+    } catch (e) {
+      failed++;
+      Logger.log(`❌ ${test.name} failed: ${e.message}`);
+    }
+  });
+  Logger.log(`\nTest Summary: ${passed} passed, ${failed} failed`);
+}
+
+function testDateTimeNormalization() {
+  const cases = [
+    { input: "9/10/2025 2:30 PM ET", expected: "2025-09-10T18:30:00Z" },
+    { input: "2025-09-10 14:00:00", expected: "2025-09-10T18:00:00Z" },
+    { input: "10-Sep-2025 09:15", expected: "2025-09-10T13:15:00Z" },
+    { input: "Invalid Date", expected: null }
+  ];
+  cases.forEach(({input, expected}, i) => {
+    const result = normalizeDateTime(input);
+    if (result !== expected) {
+      throw new Error(`Case ${i + 1} failed: expected ${expected}, got ${result}`);
+    }
+  });
+}
+
+function testAddressValidation() {
+  const cases = [
+    { input: "123 Main St, Atlanta, GA 30303", expected: true },
+    { input: "Houston", expected: false },
+    { input: "", expected: false }
+  ];
+  cases.forEach(({input, expected}, i) => {
+    const result = validateAddress(input);
+    if (result !== expected) {
+      throw new Error(`Case ${i + 1} failed: expected ${expected}, got ${result}`);
+    }
+  });
+}
+
+function testLoadIdValidation() {
+  const existingIds = ["TL123456", "TL789012"];
+  const cases = [
+    { input: "TL345678", expected: true },
+    { input: "TL123456", expected: false },
+    { input: "", expected: false }
+  ];
+  cases.forEach(({input, expected}, i) => {
+    const result = validateLoadId(input, existingIds);
+    if (result !== expected) {
+      throw new Error(`Case ${i + 1} failed: expected ${expected}, got ${result}`);
+    }
+  });
+}
+
+function testRequiredFieldValidation() {
+  const requiredFields = REQUIRED_FIELDS;
+  const cases = [
+    { input: { loadId: "TL123", fromAddress: "123 Main St", fromAppointmentDateTimeUTC: "2025-09-10T14:00:00Z", toAddress: "456 Oak Ave", toAppointmentDateTimeUTC: "2025-09-11T16:00:00Z", status: "assigned", driverName: "John Smith", unitNumber: "4721", broker: "BigShipper Inc" }, expected: true },
+    { input: { loadId: "TL123", fromAppointmentDateTimeUTC: "2025-09-10T14:00:00Z", toAddress: "456 Oak Ave", toAppointmentDateTimeUTC: "2025-09-11T16:00:00Z", status: "assigned", driverName: "John Smith", unitNumber: "4721", broker: "BigShipper Inc" }, expected: false },
+    { input: { loadId: "", fromAddress: "123 Main St", fromAppointmentDateTimeUTC: "2025-09-10T14:00:00Z", toAddress: "456 Oak Ave", toAppointmentDateTimeUTC: "2025-09-11T16:00:00Z", status: "assigned", driverName: "John Smith", unitNumber: "4721", broker: "BigShipper Inc" }, expected: false }
+  ];
+  cases.forEach(({input, expected}, i) => {
+    const result = validateRequiredFields(input, requiredFields);
+    if (result !== expected) {
+      throw new Error(`Case ${i + 1} failed: expected ${expected}, got ${result}`);
+    }
+  });
+}
+
+function testEmptyCellDetection() {
+  const cases = [
+    { input: "", expected: true },
+    { input: "   ", expected: true },
+    { input: null, expected: true },
+    { input: undefined, expected: true },
+    { input: "Not empty", expected: false }
+  ];
+  cases.forEach(({input, expected}, i) => {
+    const result = isEmptyCell(input);
+    if (result !== expected) {
+      throw new Error(`Case ${i + 1} failed: expected ${expected}, got ${result}`);
+    }
+  });
+}
+
+function normalizeDateTime(input) {
+  if (!input) return null;
+  try {
+    const date = new Date(input);
+    if (isNaN(date.getTime())) return null;
+    if (!input.includes('Z') && !input.includes('+') && !input.match(/[A-Z]{2,3}$/)) {
+      date.setHours(date.getHours() + 4); // ET -> UTC
+    }
+    return date.toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function validateAddress(address) {
+  if (!address) return false;
+  return address.length >= 10 && address.includes(',');
+}
+
+function validateLoadId(loadId, existingIds) {
+  if (!loadId) return false;
+  return !existingIds.includes(loadId);
+}
+
+function validateRequiredFields(data, requiredFields) {
+  return requiredFields.every(field => {
+    const value = data[field];
+    return value !== undefined && value !== null && value.toString().trim() !== '';
+  });
+}
+
+function isEmptyCell(value) {
+  if (value === null || value === undefined) return true;
+  return value.toString().trim() === '';
+}
+
+function insertSampleData() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const sampleData = generateSampleData();
+  sheet.clear();
+  const allHeaders = new Set();
+  [...sampleData.happyRows, ...sampleData.brokenRows].forEach(row => {
+    Object.keys(row).forEach(header => allHeaders.add(header));
+  });
+  const headers = Array.from(allHeaders);
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  const happyRowsValues = sampleData.happyRows.map(row => headers.map(header => row[header] || ''));
+  if (happyRowsValues.length > 0) {
+    sheet.getRange(2, 1, happyRowsValues.length, headers.length).setValues(happyRowsValues);
+  }
+  const brokenRowsValues = sampleData.brokenRows.map(row => headers.map(header => row[header] || ''));
+  if (brokenRowsValues.length > 0) {
+    sheet.getRange(2 + happyRowsValues.length, 1, brokenRowsValues.length, headers.length).setValues(brokenRowsValues);
+  }
+  sheet.autoResizeColumns(1, headers.length);
 }

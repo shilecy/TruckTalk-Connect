@@ -525,10 +525,10 @@
             const a = document.createElement('a');
             a.href = '#';
             a.className = 'issue-cell-link';
-            a.innerText = String(row + 1);
-            a.addEventListener('click', (e) => { e.preventDefault(); selectCell(issue.column || '', row + 1); });
+            a.innerText = String(row );
+            a.addEventListener('click', (e) => { e.preventDefault(); selectCell(issue.column || '', row); });
             rowsP.appendChild(a);
-            if (idx < issue.rows.length - 1) rowsP.appendChild(document.createTextNode(', '));
+            if (idx < issue.rows.length) rowsP.appendChild(document.createTextNode(', '));
           });
           issueDiv.appendChild(rowsP);
         }
