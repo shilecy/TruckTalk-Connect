@@ -10,6 +10,44 @@
         margin: 0;
         padding: 0;
       }
+      .json-container {
+        background-color: #f8f9fa;
+        border: 1px solid #dadce0;
+        border-radius: 8px;
+        margin: 15px 0;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+      .json-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 15px;
+        background-color: #e8f0fe;
+        border-bottom: 1px solid #dadce0;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .json-title {
+        font-weight: 500;
+        color: #1a73e8;
+      }
+      .json-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .json-content {
+        padding: 15px;
+        margin: 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: 'Menlo', 'Courier New', monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        overflow-x: auto;
+        background-color: white;
+      }
       .tab-container {
         display: flex;
         justify-content: space-around;
@@ -86,6 +124,20 @@
         border-radius: 8px;
         text-align: center;
       }
+      #sendBtn {
+          background-color: #e8f0fe; /* Example: blue */
+          color: #5f6368;               /* Example: white text */
+          border-radius: 8px;
+          padding: 10px 15px;
+          cursor: pointer;
+          font-size: 14px;
+          border: 1px solid #e8f0fe;
+          transition: all 0.2s;
+      }
+        #sendBtn:hover {
+        background-color: #f1f3f4;
+        border-color: #c5c7c9;
+      }
       .action-buttons {
         display: flex;
         gap: 10px;
@@ -94,8 +146,8 @@
       }
       .action-buttons button {
         padding: 10px 15px;
-        border: 1px solid #dadce0;
-        background-color: #fff;
+        border: 1px solid #e8f0fe;
+        background-color: #e8f0fe;
         color: #5f6368;
         border-radius: 8px;
         cursor: pointer;
@@ -121,13 +173,35 @@
         border-left: 4px solid #f9ab00;
         background-color: #fff7e6;
       }
+      .issue-header {
+        font-weight: bold;
+        text-align: center;
+        padding: 4px 0 4px 0;
+        border-radius: 6px 6px 0 0;
+        margin: -15px -15px 10px -15px;
+        letter-spacing: 1px;
+        font-size: 15px;
+      }
+      .issue-header.error {
+        background: #e57373;
+        color: #fff;
+      }
+      .issue-header.warn {
+        background: #ffe082;
+        color: #7c4700;
+      }
+      .issue-title {
+        font-size: 15px;
+        font-weight: 500;
+        margin-bottom: 6px;
+      }
       .issue:hover {
         background-color: #f1f3f4;
       }
       .issue-cell-link {
         font-weight: bold;
         text-decoration: underline;
-        color: #1a73e8;
+        color: #3168c0;
         cursor: pointer;
       }
       pre {
@@ -293,17 +367,30 @@
 
     // ====== Analysis display in Chat (short summary) ======
     function displayChatAnalysisResult(result) {
-     // If a specific load was fixed, display its JSON
-      if (result.fixedLoadJson) {
-        document.getElementById('fixedJsonOutput').style.display = 'block';
-        document.getElementById('fixedJsonPreview').innerText = JSON.stringify(result.fixedLoadJson, null, 2);
-        appendMessage('Bot', result.aiSummary || "Fix applied successfully!");
-      }
-
+      // For chat tab, only show issue summary and status
       if (!result || !result.issues || result.issues.length === 0) {
-        appendMessage('Bot', "✅ No issues found. All good!");
+        appendMessage('Bot', "✅ No issues found. All good! Check the Results tab for the validated JSON data.");
         return;
       }
+      
+      // Count issues by severity
+      const errorCount = result.issues.filter(i => i.severity === 'error').length;
+      const warnCount = result.issues.filter(i => i.severity === 'warn').length;
+      
+      appendMessage('Bot', 
+        `⚠️ Found ${result.issues.length} issue${result.issues.length > 1 ? 's' : ''} ` +
+        `(${errorCount} error${errorCount !== 1 ? 's' : ''}, ${warnCount} warning${warnCount !== 1 ? 's' : ''}). ` +
+        `Switch to the Results tab to see details and JSON output.`
+      );
+
+      // Show only a brief summary in chat
+      if (result.aiSummary) {
+        appendMessage('Bot', `🔧 ${result.aiSummary}`);
+      }
+
+      // Automatically switch to Results tab to show JSON
+      switchTab('results');
+      displayAnalysisResult(result);
 
       // store result for later Fix / Confirm actions
       resultCache = result;
@@ -327,36 +414,81 @@
     function displayAnalysisResult(result) {
       resultCache = result;  // cache it
       resultsContentDiv.innerHTML = '';
+      resultsTab.style.display = 'block';
 
-    // always show the Results tab
-      resultsTab.style.display = 'block';  
-       
-
+      // Create wrapper
+      const wrapper = document.createElement('div');
+      
+      // Status header
+      const statusHeader = document.createElement('div');
+      statusHeader.style.marginBottom = '20px';
+      statusHeader.style.textAlign = 'center';
+      
       if (result.ok) {
-        const jsonString = JSON.stringify(result.loads || [], null, 2);
-        
-        const h = document.createElement('h3'); h.innerText = '✅ Analysis Complete!';
-        wrapper.appendChild(h);
-        const p = document.createElement('p'); p.innerText = 'All checks passed. Loads are ready to be pushed.';
-        wrapper.appendChild(p);
-
-        const actions = document.createElement('div'); actions.className = 'action-buttons';
-        const copyBtn = document.createElement('button'); copyBtn.id = 'copyJsonBtn'; copyBtn.innerText = 'Copy JSON';
-        const previewBtn = document.createElement('button'); previewBtn.id = 'previewPushBtn'; previewBtn.innerText = 'Preview Push';
-        actions.appendChild(copyBtn); actions.appendChild(previewBtn);
-        wrapper.appendChild(actions);
-
-        const preLabel = document.createElement('h4'); preLabel.innerText = 'Loads JSON:';
-        wrapper.appendChild(preLabel);
-        const pre = document.createElement('pre'); pre.id = 'jsonPreview'; pre.innerText = jsonString;
-        wrapper.appendChild(pre);
-
-        resultsContentDiv.appendChild(wrapper);
-
-        copyBtn.addEventListener('click', copyJson);
-        previewBtn.addEventListener('click', previewPush);
-        return;
+        statusHeader.innerHTML = `
+          <h3 style="color: #34a853;">✅ Analysis Complete!</h3>
+          <p>All validation checks passed. Loads are ready to be pushed.</p>
+        `;
+      } else {
+        const errorCount = result.issues.filter(i => i.severity === 'error').length;
+        const warnCount = result.issues.filter(i => i.severity === 'warn').length;
+        statusHeader.innerHTML = `
+          <h3 style="color: ${errorCount > 0 ? '#ea4335' : '#fbbc04'}">
+            ⚠️ Found ${result.issues.length} issue${result.issues.length !== 1 ? 's' : ''}
+          </h3>
+          <p>${errorCount} error${errorCount !== 1 ? 's' : ''}, ${warnCount} warning${warnCount !== 1 ? 's' : ''}</p>
+        `;
       }
+      wrapper.appendChild(statusHeader);
+
+      // JSON Output Section
+      const jsonContainer = document.createElement('div');
+      jsonContainer.className = 'json-container';
+      
+      // JSON Header with actions
+      const jsonHeader = document.createElement('div');
+      jsonHeader.className = 'json-header';
+      jsonHeader.innerHTML = `
+        <div class="json-title">Validated Loads Data</div>
+        <div class="json-actions">
+          <button id="copyJsonBtn" class="action-button">
+            <span style="margin-right: 4px;">📋</span> Copy
+          </button>
+          <button id="previewPushBtn" class="action-button">
+            <span style="margin-right: 4px;">🚀</span> Preview Push
+          </button>
+        </div>
+      `;
+      jsonContainer.appendChild(jsonHeader);
+      
+      // JSON Content
+      const jsonContent = document.createElement('pre');
+      jsonContent.className = 'json-content';
+      jsonContent.textContent = JSON.stringify(result.loads || [], null, 2);
+      jsonContainer.appendChild(jsonContent);
+      
+      wrapper.appendChild(jsonContainer);
+
+      // Style the action buttons
+      const actionButtons = wrapper.querySelectorAll('.action-button');
+      actionButtons.forEach(btn => {
+        btn.style.cssText = `
+          padding: 6px 12px;
+          border: 1px solid #dadce0;
+          border-radius: 4px;
+          background-color: white;
+          color: #1a73e8;
+          cursor: pointer;
+          font-size: 13px;
+          transition: all 0.2s;
+        `;
+      });
+
+      // Add event listeners
+      wrapper.querySelector('#copyJsonBtn').addEventListener('click', copyJson);
+      wrapper.querySelector('#previewPushBtn').addEventListener('click', previewPush);
+
+      resultsContentDiv.appendChild(wrapper);
 
       // Issues mode
       const heading = document.createElement('h3'); heading.innerText = '⚠️ Issues Found:';
@@ -367,17 +499,22 @@
       (result.issues || []).forEach((issue, i) => {
         const issueDiv = document.createElement('div');
         issueDiv.className = 'issue ' + (issue.severity || '');
-        // numbering the issues
-        const title = document.createElement('p');
-        title.innerHTML = `<strong>${i+1}. ${issue.severity.toUpperCase()}:</strong> ${issue.message}`;
+
+        // Header: ERROR/WARN
+        const header = document.createElement('div');
+        header.className = 'issue-header ' + (issue.severity || '');
+        header.innerText = (issue.severity || '').toUpperCase();
+        issueDiv.appendChild(header);
+
+        // Title: numbered issue name
+        const title = document.createElement('div');
+        title.className = 'issue-title';
+        title.innerText = `${i + 1}. ${issue.message}`;
         issueDiv.appendChild(title);
-        // message
-        const msg = document.createElement('p');
-        
-        // suggestion
+
+        // Suggestion
         const suggestion = document.createElement('p');
         suggestion.innerHTML = `<small>Suggestion: ${issue.suggestion || "Please review and update the sheet manually."}</small>`;
-        issueDiv.appendChild(msg);
         issueDiv.appendChild(suggestion);
 
         // affected rows (clickable links)
@@ -413,7 +550,7 @@
           const mapP = document.createElement('p');
           const mapA = document.createElement('a');
           mapA.href = '#';
-          mapA.innerText = `Confirm mapping to '${mappingTarget}'`; 
+          mapA.innerText = `Confirm mapping to '${mappingTarget}'`;
           mapA.style.color = '#1a73e8';
           mapA.style.textDecoration = 'underline';
           mapA.addEventListener('click', (e) => { e.preventDefault(); applyMapping(issue.column, mappingTarget); });
@@ -462,24 +599,48 @@
         return;
       }
       const issue = resultCache.issues[fixIssueIndex];
-      appendMessage('Bot', `🔧 Attempting to fix: ${issue.message}`);
+      appendMessage('Bot', `🤔 Analyzing issue: ${issue.message}`);
       fixConfirmModal.style.display = 'none';
-      resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">Applying fix...</p>`;
+      resultsInChatDiv.innerHTML = `<div class="loader"></div><p style="text-align:center;">AI is analyzing and fixing the issue...</p>`;
 
-      google.script.run
+    google.script.run
         .withSuccessHandler((newResult) => {
           resultsInChatDiv.innerHTML = '';
           if (newResult && typeof newResult === 'object') {
-            appendMessage('Bot', `🎉 ${newResult.aiSummary || "Fix applied successfully!"}`);
+            // Just show a simple confirmation message in the chat
+            appendMessage('Bot', `✅ Fixed Issue ${fixIssueIndex + 1}.`);              
+
+            // Then show AI's explanation
+            if (newResult.aiSummary) {
+              appendMessage('Bot', `🔍 ${newResult.aiSummary}`);
+            }
+
+            // Update the full analysis results in the Results tab
             displayChatAnalysisResult(newResult);
             displayAnalysisResult(newResult);
+            
+            // Show remaining issues count
+            const remainingIssues = newResult.issues ? newResult.issues.length : 0;
+            if (remainingIssues > 0) {
+              appendMessage('Bot', `⚠️ ${remainingIssues} remaining issue${remainingIssues > 1 ? 's' : ''} found. Check the Results tab for details.`);
+            } else {
+              appendMessage('Bot', '✨ All issues have been resolved!');
+            }
+
             switchTab('results');
         } else {
-            appendMessage('Bot', `🔧 Fix attempted: ${newResult || "Re-analyzing..."}`);
+            appendMessage('Bot', `❌ Unable to fix: ${newResult || "Unknown error"}`);
         }
         })
         .withFailureHandler(onError)
-        .handleChatMessage({ command: 'apply_fix', issue: issue });
+        .handleChatMessage({ 
+          command: 'apply_fix', 
+          issue: issue,
+          context: {
+            issueIndex: fixIssueIndex,
+            totalIssues: resultCache.issues.length
+          }
+        });
     }
 
     // ====== Selecting a cell (calls server-side) ======

@@ -47,7 +47,7 @@ const HEADER_MAPPINGS = {
 function handleChatMessage(payload) { 
   try {
     if (payload.command === "analyze_sheet") {
-      return analyzeActiveSheet(payload.opts || {});
+      return analyzeActiveSheet({ returnLoads: false });
     }
 
     if (payload.command === "apply_fix") {
@@ -56,7 +56,7 @@ function handleChatMessage(payload) {
 
     if (payload.command === "apply_mapping") {
       // user confirmed mapping -> re-run analysis with overrides
-      return analyzeActiveSheet({ headerOverrides: payload.mapping });
+      return analyzeActiveSheet({ headerOverrides: payload.mapping, returnLoads: true });
     }
 
     // default → let AI chat handle it
@@ -81,6 +81,24 @@ function applyFix(issue) {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
 
+  // Add helper function to combine date and time into ISO 8601
+  function combineDateTime(dateValue, timeValue) {
+    if (!dateValue || !timeValue) return null;
+    
+    let date = new Date(dateValue);
+    let time = new Date(timeValue);
+    
+    // If time has the 1899-12-30 date, extract just the time part
+    if (time.getFullYear() === 1899 && time.getMonth() === 11 && time.getDate() === 30) {
+      date.setHours(time.getHours());
+      date.setMinutes(time.getMinutes());
+      date.setSeconds(time.getSeconds());
+    }
+    
+    // Convert to ISO string and ensure UTC
+    return date.toISOString();
+  }
+
  // prepare AI prompt
   const systemPrompt = `
     You are TruckTalk Connect, AI assistant for fixing logistics data in Google Sheets.
@@ -88,18 +106,51 @@ function applyFix(issue) {
     Rules:
     - Fix ONLY the described issue.
     - Never invent values. If a value is invalid but repairable, normalize it.
-        Example: turn 08/29 2pm MST into 2025‑08‑29T20:00:00Z; state assumptions.
-    - If both date and time are missing, leave blank and flag only.
+    - For datetime fixes:
+      * Combine separate date and time columns into ISO 8601 UTC
+      * If time has '1899-12-30', extract only the time part
+      * Handle common formats: MM/DD/YY, DD-MM-YYYY, etc.
+      * Convert all times to UTC (assume ET if no timezone)
+      * Example outputs:
+        - Date only: 2025-09-08T00:00:00Z
+        - With time: 2025-09-08T14:30:00Z
+      * If both date and time are missing, leave blank and flag only.
     - Always output STRICT JSON in this format:
  {
-  "fixes": [ { "row": number, "column": string, "newValue": string } ],
-  "summary": "string"
+  "fixes": [{ 
+    "row": number,
+    "column": string,
+    "newValue": string,
+    "sourceColumns": string[],  // for combined date/time fixes
+    "sourceValues": string[]    // original values used
+  }],
+  "summary": string,
+  "transformations": [{         // explain what was done
+    "type": "datetime",
+    "from": string,
+    "to": string,
+    "logic": string
+  }]
  }`;
 
+  // Enhanced prompt with datetime context
   const userPrompt = `
   Issue to fix: ${issue.message}
   Headers: ${JSON.stringify(headers)}
   Sample rows: ${JSON.stringify(rows.slice(0,5))}
+  
+  Context for datetime fixes:
+  - Current year: ${new Date().getFullYear()}
+  - Default timezone: ET (UTC-4)
+  - Date columns: ${headers.filter(h => h.toLowerCase().includes('date')).join(', ')}
+  - Time columns: ${headers.filter(h => h.toLowerCase().includes('time')).join(', ')}
+  
+  Special handling:
+  1. If you see '1899-12-30' in time fields, extract only the time part
+  2. For separate date/time columns:
+     - Find matching pairs (e.g., 'PU date' + 'PU time')
+     - Combine them into ISO 8601 UTC
+  3. Return detailed transformation explanation
   `;
 
   const response = UrlFetchApp.fetch("https://api.openai.com/v1/chat/completions", {
@@ -119,17 +170,54 @@ function applyFix(issue) {
   const data = JSON.parse(response.getContentText());
   const parsed = JSON.parse(data.choices[0].message.content);
 
-  // Apply fixes
+  // Apply fixes with special handling for datetime issues
   parsed.fixes.forEach(fix => {
-    const colIndex = headers.indexOf(fix.column) + 1;
-    if (colIndex > 0) {
-      sheet.getRange(fix.row + 2, colIndex).setValue(fix.newValue);
+    if (fix.sourceColumns && fix.sourceColumns.length > 1) {
+      // This is a combined date/time fix
+      const targetColIndex = headers.indexOf(fix.column) + 1;
+      if (targetColIndex > 0) {
+        // If column doesn't exist, create it
+        if (targetColIndex > sheet.getLastColumn()) {
+          sheet.insertColumnAfter(sheet.getLastColumn());
+          sheet.getRange(1, targetColIndex).setValue(fix.column);
+        }
+        
+        // Apply the combined datetime value
+        sheet.getRange(fix.row + 2, targetColIndex).setValue(fix.newValue);
+        
+        // Optionally hide or mark original columns as processed
+        fix.sourceColumns.forEach(sourceCol => {
+          const sourceColIndex = headers.indexOf(sourceCol) + 1;
+          if (sourceColIndex > 0) {
+            const cell = sheet.getRange(fix.row + 2, sourceColIndex);
+            cell.setBackground('#e8f0fe');  // Light blue to indicate processed
+          }
+        });
+      }
+    } else {
+      // Regular single-column fix
+      const colIndex = headers.indexOf(fix.column) + 1;
+      if (colIndex > 0) {
+        sheet.getRange(fix.row + 2, colIndex).setValue(fix.newValue);
+      }
     }
   });
 
   // Re-run analysis
-  const newResult = analyzeActiveSheet();
-  newResult.aiSummary = parsed.summary; 
+  const newResult = analyzeActiveSheet({ returnLoads: true });
+  
+  // Enhance result with fix details
+  newResult.aiSummary = parsed.summary;
+  newResult.transformations = parsed.transformations;
+  newResult.fixedLoadJson = true;  // Indicate JSON should be shown
+  
+  // If this was a datetime fix, add the transformation details
+  if (parsed.transformations && parsed.transformations.some(t => t.type === 'datetime')) {
+    newResult.changes = parsed.transformations.map(t => 
+      `📅 ${t.from} → ${t.to}\n${t.logic}`
+    ).join('\n\n');
+  }
+  
   return newResult;
 }
 
@@ -202,7 +290,7 @@ function analyzeActiveSheet(opts) {
   const headers = data[0];
   const rows = data.slice(1);
 
-  // ✅ Pass headerOverrides if provided
+  // ✅ Pass headerOverrides if provided and get the result from OpenAI
   const result = callOpenAI(headers, rows, opts?.headerOverrides || {});
 
   // Group duplicate issues + always attach suggestion
@@ -210,6 +298,18 @@ function analyzeActiveSheet(opts) {
     ...issue,
     suggestion: issue.suggestion || "Please review and update the sheet manually."
   }));
+
+    // ✅ NEW: Only include the 'loads' data if the returnLoads flag is true
+  if (opts?.returnLoads) {
+    // Re-call OpenAI to get the loads if they weren't returned before
+    if (!result.loads) {
+        const loadsResult = callOpenAI(headers, rows, opts?.headerOverrides || {}, true);
+        result.loads = loadsResult.loads;
+    }
+  } else {
+    // Delete the loads key to prevent it from being sent back
+    delete result.loads;
+  }
 
   return result;
 }
@@ -236,7 +336,7 @@ function groupIssues(issues) {
 /**
  * Calls OpenAI API with sheet snapshot
  */
-function callOpenAI(rawHeaders, sampleData) {
+function callOpenAI(rawHeaders, sampleData, headerOverrides, returnLoads = true) {
   const systemPrompt = `
 You are TruckTalk Connect, an AI assistant working inside Google Sheets.
 
@@ -323,6 +423,11 @@ Return JSON strictly as:
       analyzedAt: new Date().toISOString()
     };
 
+    // ✅ NEW: If returnLoads is false, remove the loads property
+    if (!returnLoads) {
+      delete parsed.loads;
+    }
+
     // group duplicate issues (same code+column)
     parsed.issues = groupIssues(parsed.issues || []).map(issue => ({
       ...issue,
@@ -376,3 +481,6 @@ function getOpenAIKey() {
   if (!key) throw new Error("Missing OpenAI API key. Set OPENAI_API_KEY in Script Properties.");
   return key;
 }
+
+
+
