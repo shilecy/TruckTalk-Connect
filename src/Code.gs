@@ -534,12 +534,12 @@ function getOpenAIKey() {
   return key;
 }
 
+// ================== UNIT TESTS ==================
 
-
-
-// ================== TESTS (moved from tests.gs) ==================
-
-
+/**
+ * Runs all unit tests and logs the results.
+ * This function can be run directly from the Apps Script editor.
+ */
 function runTests() {
   const tests = [
     testDateTimeNormalization,
@@ -550,6 +550,7 @@ function runTests() {
   ];
   let passed = 0;
   let failed = 0;
+  Logger.log('--- Starting Unit Tests ---');
   tests.forEach(test => {
     try {
       test();
@@ -563,80 +564,99 @@ function runTests() {
   Logger.log(`\nTest Summary: ${passed} passed, ${failed} failed`);
 }
 
+/**
+ * Test suite for the normalizeDateTime function.
+ */
 function testDateTimeNormalization() {
   const cases = [
-    { input: "9/10/2025 2:30 PM ET", expected: "2025-09-10T18:30:00Z" },
-    { input: "2025-09-10 14:00:00", expected: "2025-09-10T18:00:00Z" },
-    { input: "10-Sep-2025 09:15", expected: "2025-09-10T13:15:00Z" },
-    { input: "Invalid Date", expected: null }
+    { input: "9/10/2025 2:30 PM ET", expected: "2025-09-10T18:30:00.000Z", name: "MM/DD/YYYY with time" },
+    { input: "2025-09-10 14:00:00", expected: "2025-09-10T18:00:00.000Z", name: "YYYY-MM-DD with 24-hour time" },
+    { input: "10-Sep-2025 09:15", expected: "2025-09-10T13:15:00.000Z", name: "DD-MMM-YYYY with time" },
+    { input: "Invalid Date", expected: null, name: "Invalid string" },
+    { input: null, expected: null, name: "Null input" },
+    { input: "", expected: null, name: "Empty string" }
   ];
-  cases.forEach(({input, expected}, i) => {
+  cases.forEach(({input, expected, name}, i) => {
     const result = normalizeDateTime(input);
     if (result !== expected) {
-      throw new Error(`Case ${i + 1} failed: expected ${expected}, got ${result}`);
+      throw new Error(`Case ${i + 1} (${name}) failed: expected ${expected}, got ${result}`);
     }
   });
 }
 
+/**
+ * Test suite for the validateAddress function.
+ */
 function testAddressValidation() {
   const cases = [
-    { input: "123 Main St, Atlanta, GA 30303", expected: true },
-    { input: "Houston", expected: false },
-    { input: "", expected: false }
+    { input: "123 Main St, Atlanta, GA 30303", expected: true, name: "Valid full address" },
+    { input: "Houston", expected: false, name: "City only" },
+    { input: "", expected: false, name: "Empty address" }
   ];
-  cases.forEach(({input, expected}, i) => {
+  cases.forEach(({input, expected, name}, i) => {
     const result = validateAddress(input);
     if (result !== expected) {
-      throw new Error(`Case ${i + 1} failed: expected ${expected}, got ${result}`);
+      throw new Error(`Case ${i + 1} (${name}) failed: expected ${expected}, got ${result}`);
     }
   });
 }
 
+/**
+ * Test suite for the validateLoadId function.
+ */
 function testLoadIdValidation() {
   const existingIds = ["TL123456", "TL789012"];
   const cases = [
-    { input: "TL345678", expected: true },
-    { input: "TL123456", expected: false },
-    { input: "", expected: false }
+    { input: "TL345678", existingIds: existingIds, expected: true, name: "Unique ID" },
+    { input: "TL123456", existingIds: existingIds, expected: false, name: "Duplicate ID" },
+    { input: "", existingIds: existingIds, expected: false, name: "Empty ID" }
   ];
-  cases.forEach(({input, expected}, i) => {
+  cases.forEach(({input, existingIds, expected, name}, i) => {
     const result = validateLoadId(input, existingIds);
     if (result !== expected) {
-      throw new Error(`Case ${i + 1} failed: expected ${expected}, got ${result}`);
+      throw new Error(`Case ${i + 1} (${name}) failed: expected ${expected}, got ${result}`);
     }
   });
 }
 
+/**
+ * Test suite for the validateRequiredFields function.
+ */
 function testRequiredFieldValidation() {
   const requiredFields = REQUIRED_FIELDS;
   const cases = [
-    { input: { loadId: "TL123", fromAddress: "123 Main St", fromAppointmentDateTimeUTC: "2025-09-10T14:00:00Z", toAddress: "456 Oak Ave", toAppointmentDateTimeUTC: "2025-09-11T16:00:00Z", status: "assigned", driverName: "John Smith", unitNumber: "4721", broker: "BigShipper Inc" }, expected: true },
-    { input: { loadId: "TL123", fromAppointmentDateTimeUTC: "2025-09-10T14:00:00Z", toAddress: "456 Oak Ave", toAppointmentDateTimeUTC: "2025-09-11T16:00:00Z", status: "assigned", driverName: "John Smith", unitNumber: "4721", broker: "BigShipper Inc" }, expected: false },
-    { input: { loadId: "", fromAddress: "123 Main St", fromAppointmentDateTimeUTC: "2025-09-10T14:00:00Z", toAddress: "456 Oak Ave", toAppointmentDateTimeUTC: "2025-09-11T16:00:00Z", status: "assigned", driverName: "John Smith", unitNumber: "4721", broker: "BigShipper Inc" }, expected: false }
+    { input: { loadId: "TL123", fromAddress: "123 Main St", fromAppointmentDateTimeUTC: "2025-09-10T14:00:00Z", toAddress: "456 Oak Ave", toAppointmentDateTimeUTC: "2025-09-11T16:00:00Z", status: "assigned", driverName: "John Smith", unitNumber: "4721", broker: "BigShipper Inc" }, expected: true, name: "All fields present" },
+    { input: { loadId: "TL123", fromAppointmentDateTimeUTC: "2025-09-10T14:00:00Z", toAddress: "456 Oak Ave", toAppointmentDateTimeUTC: "2025-09-11T16:00:00Z", status: "assigned", driverName: "John Smith", unitNumber: "4721", broker: "BigShipper Inc" }, expected: false, name: "Missing 'fromAddress'" },
+    { input: { loadId: "", fromAddress: "123 Main St", fromAppointmentDateTimeUTC: "2025-09-10T14:00:00Z", toAddress: "456 Oak Ave", toAppointmentDateTimeUTC: "2025-09-11T16:00:00Z", status: "assigned", driverName: "John Smith", unitNumber: "4721", broker: "BigShipper Inc" }, expected: false, name: "Empty 'loadId'" }
   ];
-  cases.forEach(({input, expected}, i) => {
+  cases.forEach(({input, expected, name}, i) => {
     const result = validateRequiredFields(input, requiredFields);
     if (result !== expected) {
-      throw new Error(`Case ${i + 1} failed: expected ${expected}, got ${result}`);
+      throw new Error(`Case ${i + 1} (${name}) failed: expected ${expected}, got ${result}`);
     }
   });
 }
 
+/**
+ * Test suite for the isEmptyCell function.
+ */
 function testEmptyCellDetection() {
   const cases = [
-    { input: "", expected: true },
-    { input: "   ", expected: true },
-    { input: null, expected: true },
-    { input: undefined, expected: true },
-    { input: "Not empty", expected: false }
+    { input: "", expected: true, name: "Empty string" },
+    { input: "    ", expected: true, name: "Whitespace string" },
+    { input: null, expected: true, name: "Null value" },
+    { input: undefined, expected: true, name: "Undefined value" },
+    { input: "Not empty", expected: false, name: "Non-empty string" }
   ];
-  cases.forEach(({input, expected}, i) => {
+  cases.forEach(({input, expected, name}, i) => {
     const result = isEmptyCell(input);
     if (result !== expected) {
-      throw new Error(`Case ${i + 1} failed: expected ${expected}, got ${result}`);
+      throw new Error(`Case ${i + 1} (${name}) failed: expected ${expected}, got ${result}`);
     }
   });
 }
+
+// ================== HELPER FUNCTIONS ==================
 
 function normalizeDateTime(input) {
   if (!input) return null;
