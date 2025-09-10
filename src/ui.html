@@ -471,9 +471,16 @@
       jsonContainer.appendChild(jsonActions);
       
       // JSON Content
+      // JSON Content (show fixedJson if available, else loads)
       const jsonContent = document.createElement('pre');
       jsonContent.className = 'json-content';
-      jsonContent.textContent = JSON.stringify(result.loads || [], null, 2);
+
+      if (result.fixedJson && result.fixedJson.length) {
+        jsonContent.textContent = JSON.stringify(result.fixedJson, null, 2);
+      } else {
+        jsonContent.textContent = JSON.stringify(result.loads || [], null, 2);
+      }
+
       jsonContainer.appendChild(jsonContent);
       
       wrapper.appendChild(jsonContainer);

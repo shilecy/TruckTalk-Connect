@@ -196,6 +196,7 @@ function applyFix(issue) {
         - Date only: 2025-09-08T00:00:00Z
         - With time: 2025-09-08T14:30:00Z
       * If both date and time are missing, leave blank and flag only.
+      * After each successfully fixed issue, must always return json output.
     - Always output STRICT JSON in this format:
  {
   "fixes": [{ 
@@ -205,8 +206,6 @@ function applyFix(issue) {
     "sourceColumns": string[],  // for combined date/time fixes
     "sourceValues": string[]    // original values used
   }],
-  suggestionTarget?: string // New field for mapping suggestions
-  }>,
   loads?: any[],
   mapping: Record<string,string>,
   meta: { analyzedRows: number, analyzedAt: string }
@@ -285,17 +284,26 @@ function applyFix(issue) {
   // Re-run analysis
   const newResult = analyzeActiveSheet({ returnLoads: true });
   
+  // Attach JSON for fixed issue(s)
+ try {
+   newResult.fixedJson = parsed.fixes.map(fix => {
+     const rowIndex = fix.row; // because your AI prompt now outputs real sheet row numbers
+     const rowValues = sheet.getRange(rowIndex, 1, 1, headers.length).getValues()[0];
+     const obj = {};
+     headers.forEach((h, i) => {
+       obj[h] = rowValues[i];
+     });
+     return obj;
+   });
+ } catch (e) {
+   newResult.fixedJson = [];
+   console.error("Error building fixedJson:", e.message);
+ }
+
   // Enhance result with fix details
   newResult.aiSummary = parsed.summary;
   newResult.transformations = parsed.transformations;
   newResult.fixedLoadJson = true;  // Indicate JSON should be shown
-  
-  // If this was a datetime fix, add the transformation details
-  if (parsed.transformations && parsed.transformations.some(t => t.type === 'datetime')) {
-    newResult.changes = parsed.transformations.map(t => 
-      `📅 ${t.from} → ${t.to}\n${t.logic}`
-    ).join('\n\n');
-  }
   
   return newResult;
 }
