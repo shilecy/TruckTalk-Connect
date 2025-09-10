@@ -196,7 +196,6 @@ function applyFix(issue) {
         - Date only: 2025-09-08T00:00:00Z
         - With time: 2025-09-08T14:30:00Z
       * If both date and time are missing, leave blank and flag only.
-      * After each successfully fixed issue, must always return json output.
     - Always output STRICT JSON in this format:
  {
   "fixes": [{ 
