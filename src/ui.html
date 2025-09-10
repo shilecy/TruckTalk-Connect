@@ -11,7 +11,7 @@
         padding: 0;
       }
       .json-container {
-        background-color: #e8f0fe;
+        background-color: #f8f9fa;
         border: 1px solid #dadce0;
         border-radius: 8px;
         margin: 15px 0;
@@ -471,16 +471,9 @@
       jsonContainer.appendChild(jsonActions);
       
       // JSON Content
-      // JSON Content (show fixedJson if available, else loads)
       const jsonContent = document.createElement('pre');
       jsonContent.className = 'json-content';
-
-      if (result.fixedJson && result.fixedJson.length) {
-        jsonContent.textContent = JSON.stringify(result.fixedJson, null, 2);
-      } else {
-        jsonContent.textContent = JSON.stringify(result.loads || [], null, 2);
-      }
-
+      jsonContent.textContent = JSON.stringify(result.loads || [], null, 2);
       jsonContainer.appendChild(jsonContent);
       
       wrapper.appendChild(jsonContainer);
