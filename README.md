@@ -87,7 +87,8 @@ The add-on flags issues (missing columns, duplicate IDs, bad dates, etc.) and pr
   3. Apply a fix
   4. Show JSON output
 
-Screencast_link = https://drive.google.com/file/d/1hHi23qyCO1BXRyoMOHwkv8dl2xmZmUDu/view?usp=sharing
+- Screencast_link = https://drive.google.com/file/d/1hHi23qyCO1BXRyoMOHwkv8dl2xmZmUDu/view?usp=sharing
+
 ---
 
 ## Limitations
